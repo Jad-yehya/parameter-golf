@@ -16,7 +16,6 @@
 # Note: alias smear dampening (the second lever in our prior PR #2109) is DISABLED here —
 # the forward-path patches exist in the code but `alias_dampening_active=False` is forced
 # regardless of MARKER_PAIR_MODE, so SmearGate behaves identically to PR #2135 vanilla.
-# Ablation showed alias smear regresses on PR #2135 + MP3 by +0.00022 BPB at seed=42.
 #
 # Usage:
 #   bash run_3seed.sh
@@ -39,6 +38,11 @@ if [ ! -f "$TOKENIZER_PATH" ]; then
   echo "ERROR: tokenizer model not found: $TOKENIZER_PATH"
   exit 1
 fi
+if [ ! -f "$DATA_PATH/alias_map.json" ]; then
+  echo "ERROR: MP3 alias map not found: $DATA_PATH/alias_map.json"
+  echo "Run prepare_marker_pair_v3.py, or point DATA_PATH at the marker-pair dataset."
+  exit 1
+fi
 
 # Build native ngram-tilt helper if missing (matches PR #2135 setup).
 if [ ! -f "libonline_ngram_state.so" ] && [ -f "online_ngram_state.c" ]; then
@@ -51,6 +55,8 @@ echo "[$(ts)] === 3-seed run START ==="
 echo "  SEEDS:          $SEEDS"
 echo "  DATA_PATH:      $DATA_PATH"
 echo "  TOKENIZER_PATH: $TOKENIZER_PATH"
+
+FAILED_SEEDS=()
 
 for SEED in $SEEDS; do
   LOG="train_seed${SEED}.log"
@@ -121,6 +127,9 @@ for SEED in $SEEDS; do
     torchrun --standalone --nproc_per_node=8 train_gpt.py 2>&1 | tee "$LOG"
   rc="${PIPESTATUS[0]}"
   echo "[$(ts)] <<< seed=$SEED done (rc=$rc) <<<"
+  if [ "$rc" -ne 0 ]; then
+    FAILED_SEEDS+=("$SEED:rc=$rc")
+  fi
 done
 
 echo ""
@@ -136,4 +145,13 @@ for SEED in $SEEDS; do
   sz=$(grep "Total submission size quantized+pergroup" "$LOG" 2>/dev/null | grep -oE "[0-9]+" | tail -1)
   ev=$(grep -oP "total_eval_time:\K[0-9.]+" "$LOG" 2>/dev/null | tail -1)
   printf "%-8s %-16s %-14s %-12s %s\n" "$SEED" "${sw:-?}" "${vl:-?}" "${sz:-?}" "${ev:-?}"
+  if [ -z "${sw:-}" ] || [ -z "${vl:-}" ] || [ -z "${sz:-}" ] || [ -z "${ev:-}" ]; then
+    FAILED_SEEDS+=("$SEED:missing_summary_metric")
+  fi
 done
+
+if [ "${#FAILED_SEEDS[@]}" -ne 0 ]; then
+  echo ""
+  echo "ERROR: incomplete or failed validation: ${FAILED_SEEDS[*]}"
+  exit 1
+fi

@@ -119,17 +119,22 @@ def _process_one_shard(args):
     dst = os.path.join(dst_dir, name)
     _hdr, toks = _read_shard_with_header(src)
     bytes_arr = None
+    byte_sum_in = 0
     if with_bytes:
         bp = src.replace("fineweb_val_", "fineweb_val_bytes_")
         if os.path.exists(bp):
             _hdr_b, bytes_arr = _read_shard_with_header(bp)
             if len(bytes_arr) != len(toks):
                 raise RuntimeError(f"length mismatch: {bp} ({len(bytes_arr)}) vs {src} ({len(toks)})")
+            byte_sum_in = int(bytes_arr.astype(np.uint64).sum())
     new_toks, new_bytes = fuse_stream(toks, bytes_arr)
+    byte_sum_out = int(new_bytes.astype(np.uint64).sum()) if new_bytes is not None else 0
+    if with_bytes and new_bytes is not None and byte_sum_in != byte_sum_out:
+        raise RuntimeError(f"byte sidecar sum changed for {src}: {byte_sum_in} -> {byte_sum_out}")
     _write_shard_with_header(dst, new_toks)
     if with_bytes and new_bytes is not None:
         _write_shard_with_header(dst.replace("fineweb_val_", "fineweb_val_bytes_"), new_bytes)
-    return name, len(toks), len(new_toks)
+    return name, len(toks), len(new_toks), byte_sum_in, byte_sum_out
 
 
 def process_shards(src_pattern: str, dst_dir: str, with_bytes: bool, label: str, workers: int):
@@ -140,19 +145,24 @@ def process_shards(src_pattern: str, dst_dir: str, with_bytes: bool, label: str,
     src_files = sorted(glob.glob(src_pattern))
     if not src_files:
         print(f"  [{label}] no shards matched {src_pattern}")
-        return 0, 0
+        return 0, 0, 0, 0
     n = len(src_files)
     print(f"  [{label}] {n} shards, workers={workers}")
     total_in, total_out = 0, 0
+    total_bytes_in, total_bytes_out = 0, 0
     args_iter = [(src, dst_dir, with_bytes) for src in src_files]
     with mp.Pool(processes=min(workers, n)) as pool:
-        for name, n_in, n_out in pool.imap_unordered(_process_one_shard, args_iter, chunksize=1):
+        for name, n_in, n_out, bytes_in, bytes_out in pool.imap_unordered(_process_one_shard, args_iter, chunksize=1):
             saved = n_in - n_out
             total_in += n_in
             total_out += n_out
+            total_bytes_in += bytes_in
+            total_bytes_out += bytes_out
             # print sparsely to keep log readable
     print(f"  [{label}] all {n} shards done: {total_in:,} -> {total_out:,} ({(total_in - total_out)/max(total_in,1)*100:.2f}% saved)")
-    return total_in, total_out
+    if with_bytes:
+        print(f"  [{label}] byte sidecar sum: {total_bytes_in:,} -> {total_bytes_out:,}")
+    return total_in, total_out, total_bytes_in, total_bytes_out
 
 
 def main():
@@ -187,14 +197,15 @@ def main():
     workers = int(os.environ.get("WORKERS", os.cpu_count() or 8))
 
     print(f"\n[train shards] workers={workers}")
-    tr_in, tr_out = process_shards(f"{src_root}/fineweb_train_*.bin", dst_root, False, "train", workers)
+    tr_in, tr_out, _tr_bytes_in, _tr_bytes_out = process_shards(f"{src_root}/fineweb_train_*.bin", dst_root, False, "train", workers)
     if tr_in:
         print(f"  train total: {tr_in:,} -> {tr_out:,}  ({(tr_in - tr_out) / tr_in * 100:.2f}% saved)")
 
     print(f"\n[val shards + bytes sidecar] workers={workers}")
-    val_in, val_out = process_shards(f"{src_root}/fineweb_val_[0-9]*.bin", dst_root, True, "val", workers)
+    val_in, val_out, val_bytes_in, val_bytes_out = process_shards(f"{src_root}/fineweb_val_[0-9]*.bin", dst_root, True, "val", workers)
     if val_in:
         print(f"  val total: {val_in:,} -> {val_out:,}  ({(val_in - val_out) / val_in * 100:.2f}% saved)")
+        print(f"  val byte sum preserved: {val_bytes_in:,} -> {val_bytes_out:,}")
 
     alias_map_data = {
         "alias_map": {

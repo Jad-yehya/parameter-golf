@@ -4,7 +4,7 @@ This is a validation candidate, not a completed submission. Do not open a PR wit
 
 ## Hypothesis
 
-PR #2158 showed that MP3 marker-pair fusion composes with the current PR #2135 frontier stack, reporting a post-deadline non-record 3-seed mean of 1.05559 BPB. This candidate keeps that MP3 mechanism and adds two small validation levers:
+[PR #2158](https://github.com/openai/parameter-golf/pull/2158) showed that MP3 marker-pair fusion composes with the current PR #2135 frontier stack, reporting a post-deadline non-record 3-seed mean of 1.05559 BPB. This candidate keeps that MP3 mechanism and adds two small validation levers:
 
 `ADAPTIVE_NGRAM_GAMMA=1.0` keeps the existing strict token-only n-gram hint but scales its boost by `(1 - q_hint)`, where `q_hint` is the model's prefix-conditioned probability assigned to the hinted token. This preserves the closed-form normalization and reduces over-tilting when the neural model already agrees with the n-gram expert.
 
