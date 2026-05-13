@@ -71,6 +71,8 @@ class Hyperparameters:
     loss_weighting = os.environ.get("LOSS_WEIGHTING", "mdlm")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
+    noise_schedule = os.environ.get("NOISE_SCHEDULE", "loglinear")
+    noise_power = float(os.environ.get("NOISE_POWER", "2.0"))
 
     lr = float(os.environ.get("LR", "6e-4"))
     weight_decay = float(os.environ.get("WEIGHT_DECAY", "0.1"))
@@ -132,6 +134,59 @@ def log_linear_noise(t: Tensor, eps: float = 0.1) -> tuple[Tensor, Tensor]:
     return sigma, alpha
 
 
+def normalize_noise_schedule(schedule: str) -> str:
+    name = schedule.strip().lower().replace("_", "-")
+    aliases = {
+        "linear": "loglinear",
+        "log-linear": "loglinear",
+        "loglinear": "loglinear",
+        "cos": "cosine",
+        "cosine": "cosine",
+        "power": "power",
+    }
+    try:
+        return aliases[name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported NOISE_SCHEDULE={schedule!r}") from exc
+
+
+def compute_noise_schedule(
+    t: Tensor,
+    eps: float = 0.1,
+    schedule: str = "loglinear",
+    power: float = 2.0,
+) -> tuple[Tensor, Tensor, Tensor]:
+    if not 0.0 < eps < 1.0:
+        raise ValueError("NOISE_EPS must be in (0, 1)")
+    schedule = normalize_noise_schedule(schedule)
+    if schedule == "loglinear":
+        sigma, alpha = log_linear_noise(t, eps=eps)
+        dsigma = (1.0 - eps) / alpha
+        return sigma, alpha, dsigma
+    if schedule == "cosine":
+        alpha = eps + (1.0 - eps) * torch.cos(0.5 * math.pi * t).square()
+        sigma = -torch.log(alpha.clamp_min(1e-8))
+        dsigma = (1.0 - eps) * (0.5 * math.pi) * torch.sin(math.pi * t).clamp_min(0.0) / alpha
+        return sigma, alpha, dsigma
+    if schedule == "power":
+        if power < 1.0:
+            raise ValueError("NOISE_POWER must be >= 1 for finite endpoint derivative")
+        alpha = 1.0 - (1.0 - eps) * t.pow(power)
+        sigma = -torch.log(alpha.clamp_min(1e-8))
+        dsigma = (1.0 - eps) * power * t.clamp_min(0.0).pow(power - 1.0) / alpha
+        return sigma, alpha, dsigma
+    raise AssertionError(f"unreachable schedule: {schedule}")
+
+
+def noise_schedule(
+    t: Tensor,
+    eps: float = 0.1,
+    schedule: str = "loglinear",
+    power: float = 2.0,
+) -> tuple[Tensor, Tensor, Tensor]:
+    return compute_noise_schedule(t, eps=eps, schedule=schedule, power=power)
+
+
 def make_corrupted_batch(
     x0: Tensor,
     t: Tensor,
@@ -139,8 +194,10 @@ def make_corrupted_batch(
     eps: float,
     pattern: str = "independent",
     span_len: int = 4,
+    noise_schedule: str = "loglinear",
+    noise_power: float = 2.0,
 ) -> tuple[Tensor, Tensor]:
-    _, alpha = log_linear_noise(t, eps=eps)
+    _, alpha, _ = compute_noise_schedule(t, eps=eps, schedule=noise_schedule, power=noise_power)
     move_chance = 1.0 - alpha
     if pattern == "independent":
         mask = torch.rand_like(x0.float()) < move_chance[:, None]
@@ -336,13 +393,22 @@ def mdlm_loss(
     eps: float = 0.1,
     span_len: int = 4,
     loss_weighting: str = "mdlm",
+    noise_schedule: str = "loglinear",
+    noise_power: float = 2.0,
 ) -> Tensor:
     bsz = x0.shape[0]
     t = torch.rand(bsz // 2 + 1, device=x0.device)
     t = torch.cat((t, 1.0 - t))[:bsz].clamp(1e-5, 1.0 - 1e-5)
-    sigma, alpha = log_linear_noise(t, eps=eps)
+    sigma, alpha, dsigma = compute_noise_schedule(t, eps=eps, schedule=noise_schedule, power=noise_power)
     xt, mask = make_corrupted_batch(
-        x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
+        x0,
+        t,
+        mask_id=model.cfg.mask_id,
+        eps=eps,
+        pattern=mask_pattern,
+        span_len=span_len,
+        noise_schedule=noise_schedule,
+        noise_power=noise_power,
     )
     self_condition_logits = None
     if model.cfg.self_condition:
@@ -355,7 +421,6 @@ def mdlm_loss(
         return ((-log_p_x0) * mask.float()).sum() / denom
     if loss_weighting != "mdlm":
         raise ValueError(f"Unsupported LOSS_WEIGHTING={loss_weighting!r}")
-    dsigma = (1.0 - eps) / alpha
     loss = (dsigma[:, None] * (-log_p_x0) * mask.float()).sum() / (x0.numel())
     return loss
 
@@ -369,11 +434,15 @@ def variational_elbo_bits(
     mask_pattern: str,
     span_len: int,
     compute_dtype: torch.dtype,
+    noise_schedule: str = "loglinear",
+    noise_power: float = 2.0,
 ) -> Tensor:
     bsz, seq_len = x0.shape
     total_bits = torch.zeros(bsz, device=x0.device)
     t_grid = torch.arange(1, n_steps + 1, device=x0.device, dtype=torch.float32) / n_steps
-    sigma_grid, alpha_grid = log_linear_noise(t_grid, eps=eps)
+    sigma_grid, alpha_grid, _ = compute_noise_schedule(
+        t_grid, eps=eps, schedule=noise_schedule, power=noise_power
+    )
     total_bits += seq_len * float(alpha_grid[-1]) * math.log(model.cfg.vocab_size) / math.log(2.0)
     alpha_prev = 1.0
     for step in range(n_steps):
@@ -381,7 +450,14 @@ def variational_elbo_bits(
         t = torch.full((bsz,), float(t_grid[step]), device=x0.device)
         sigma = sigma_grid[step].expand(bsz)
         xt, mask = make_corrupted_batch(
-            x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
+            x0,
+            t,
+            mask_id=model.cfg.mask_id,
+            eps=eps,
+            pattern=mask_pattern,
+            span_len=span_len,
+            noise_schedule=noise_schedule,
+            noise_power=noise_power,
         )
         self_condition_logits = None
         if model.cfg.self_condition:
@@ -479,6 +555,8 @@ def evaluate_bpb(
             mask_pattern=args.mask_pattern,
             span_len=args.span_len,
             compute_dtype=compute_dtype,
+            noise_schedule=args.noise_schedule,
+            noise_power=args.noise_power,
         )
         bytes_ = count_sequence_bytes(x0, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut)
         total_bits += float(bits.sum().item())
@@ -489,6 +567,7 @@ def evaluate_bpb(
 
 def main() -> None:
     args = Hyperparameters()
+    args.noise_schedule = normalize_noise_schedule(args.noise_schedule)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -548,6 +627,7 @@ def main() -> None:
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
         f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
         f" loss_weighting:{args.loss_weighting}"
+        f" noise_schedule:{args.noise_schedule} noise_power:{args.noise_power}"
     )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "
@@ -571,6 +651,8 @@ def main() -> None:
                 eps=args.noise_eps,
                 span_len=args.span_len,
                 loss_weighting=args.loss_weighting,
+                noise_schedule=args.noise_schedule,
+                noise_power=args.noise_power,
             )
         loss.backward()
         if args.grad_clip_norm > 0:
@@ -626,6 +708,8 @@ def main() -> None:
         "mask_pattern": args.mask_pattern,
         "eval_steps": args.eval_steps,
         "loss_weighting": args.loss_weighting,
+        "noise_schedule": args.noise_schedule,
+        "noise_power": args.noise_power,
     }
     log(f"compressed_state_zlib_bytes:{bytes_zlib}")
     log(f"final_var_bpb:{bpb:.8f} bits_per_token:{bits_per_token:.8f} train_seconds:{train_time:.2f}")
