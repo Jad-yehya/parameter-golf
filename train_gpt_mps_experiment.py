@@ -83,6 +83,10 @@ class Hyperparameters:
     random_map_adapter = bool(int(os.environ.get("RANDOM_MAP_ADAPTER", "0")))
     random_map_dim = int(os.environ.get("RANDOM_MAP_DIM", "64"))
     random_map_seed = int(os.environ.get("RANDOM_MAP_SEED", "20260513"))
+    causal_conv_memory = bool(int(os.environ.get("CAUSAL_CONV_MEMORY", "0")))
+    conv_kernel = int(os.environ.get("CONV_KERNEL", "5"))
+    conv_dilation = int(os.environ.get("CONV_DILATION", "1"))
+    conv_start_layer = int(os.environ.get("CONV_START_LAYER", "-1"))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -770,6 +774,9 @@ class Block(nn.Module):
         random_map_adapter: bool = False,
         random_map_dim: int = 64,
         random_map_seed: int = 0,
+        causal_conv_memory: bool = False,
+        conv_kernel: int = 5,
+        conv_dilation: int = 1,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
@@ -801,6 +808,22 @@ class Block(nn.Module):
             self.register_buffer("random_map_in", random_map, persistent=False)
             self.random_map_out = nn.Parameter(torch.zeros(random_map_dim, dim, dtype=torch.float32))
             self.random_map_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
+        self.causal_conv_memory = causal_conv_memory
+        self.conv_dilation = conv_dilation
+        if causal_conv_memory:
+            self.conv_memory_weight = nn.Parameter(torch.zeros(dim, conv_kernel, dtype=torch.float32))
+            self.conv_memory_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
+
+    def _causal_conv_memory(self, x: Tensor) -> Tensor:
+        pad = (self.conv_memory_weight.size(1) - 1) * self.conv_dilation
+        xt = F.pad(x.transpose(1, 2), (pad, 0))
+        yt = F.conv1d(
+            xt,
+            self.conv_memory_weight.to(dtype=x.dtype).unsqueeze(1),
+            groups=x.size(-1),
+            dilation=self.conv_dilation,
+        )
+        return yt.transpose(1, 2)
 
     def forward(self, x: Tensor, x0: Tensor) -> Tensor:
         mix = self.resid_mix.to(dtype=x.dtype)
@@ -812,6 +835,10 @@ class Block(nn.Module):
             features = torch.sin(x @ self.random_map_in.to(dtype=x.dtype))
             x = x + self.random_map_scale.to(dtype=x.dtype)[None, None, :] * (
                 features @ self.random_map_out.to(dtype=x.dtype)
+            )
+        if self.causal_conv_memory:
+            x = x + self.conv_memory_scale.to(dtype=x.dtype)[None, None, :] * self._causal_conv_memory(
+                self.mlp_norm(x)
             )
         return x
 
@@ -854,6 +881,10 @@ class GPT(nn.Module):
         random_map_adapter: bool = False,
         random_map_dim: int = 64,
         random_map_seed: int = 0,
+        causal_conv_memory: bool = False,
+        conv_kernel: int = 5,
+        conv_dilation: int = 1,
+        conv_start_layer: int = -1,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -870,6 +901,8 @@ class GPT(nn.Module):
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32))
+        if conv_start_layer < 0:
+            conv_start_layer = num_layers // 2
         self.blocks = nn.ModuleList(
             [
                 Block(
@@ -889,6 +922,9 @@ class GPT(nn.Module):
                     random_map_adapter,
                     random_map_dim,
                     random_map_seed + i,
+                    causal_conv_memory and i >= conv_start_layer,
+                    conv_kernel,
+                    conv_dilation,
                 )
                 for i in range(num_layers)
             ]
@@ -1113,6 +1149,10 @@ def main() -> None:
         random_map_adapter=args.random_map_adapter,
         random_map_dim=args.random_map_dim,
         random_map_seed=args.random_map_seed,
+        causal_conv_memory=args.causal_conv_memory,
+        conv_kernel=args.conv_kernel,
+        conv_dilation=args.conv_dilation,
+        conv_start_layer=args.conv_start_layer,
     ).to(device=device, dtype=compute_dtype)
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1194,6 +1234,11 @@ def main() -> None:
     log0(
         f"random_map_adapter:{args.random_map_adapter} random_map_dim:{args.random_map_dim} "
         f"random_map_seed:{args.random_map_seed}"
+    )
+    log0(
+        f"causal_conv_memory:{args.causal_conv_memory} conv_kernel:{args.conv_kernel} "
+        f"conv_dilation:{args.conv_dilation} "
+        f"conv_start_layer:{args.conv_start_layer if args.conv_start_layer >= 0 else args.num_layers // 2}"
     )
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
