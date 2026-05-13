@@ -31,6 +31,8 @@ class ModelConfig:
     num_heads: int = 4
     mlp_mult: float = 2.0
     self_condition: bool = False
+    self_cond_gate_init: float = -4.0
+    self_cond_rank: int = 0
     rope_base: float = 10000.0
 
     @property
@@ -67,6 +69,8 @@ class Hyperparameters:
     num_heads = int(os.environ.get("NUM_HEADS", "4"))
     mlp_mult = float(os.environ.get("MLP_MULT", "2.0"))
     self_condition = bool(int(os.environ.get("SELF_CONDITION", "0")))
+    self_cond_gate_init = float(os.environ.get("SELF_COND_GATE_INIT", "-4.0"))
+    self_cond_rank = int(os.environ.get("SELF_COND_RANK", "0"))
     mask_pattern = os.environ.get("MASK_PATTERN", "independent")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
@@ -303,15 +307,33 @@ class DiffusionLM(nn.Module):
         self.final_norm = nn.LayerNorm(cfg.model_dim, elementwise_affine=False)
         self.head = nn.Linear(cfg.model_dim, cfg.padded_vocab, bias=False)
         nn.init.zeros_(self.head.weight)
-        self.self_cond_proj = nn.Linear(cfg.total_vocab, cfg.model_dim, bias=False) if cfg.self_condition else None
-        if self.self_cond_proj is not None:
-            nn.init.zeros_(self.self_cond_proj.weight)
+        self.self_cond_gate = None
+        self.self_cond_proj = None
+        self.self_cond_down = None
+        self.self_cond_up = None
+        if cfg.self_condition:
+            if cfg.self_cond_rank < 0:
+                raise ValueError("self_cond_rank must be non-negative")
+            self.self_cond_gate = nn.Parameter(torch.tensor(float(cfg.self_cond_gate_init)))
+            if cfg.self_cond_rank > 0:
+                self.self_cond_down = nn.Linear(cfg.total_vocab, cfg.self_cond_rank, bias=False)
+                self.self_cond_up = nn.Linear(cfg.self_cond_rank, cfg.model_dim, bias=False)
+                nn.init.normal_(self.self_cond_down.weight, mean=0.0, std=1.0 / math.sqrt(cfg.total_vocab))
+                nn.init.zeros_(self.self_cond_up.weight)
+            else:
+                self.self_cond_proj = nn.Linear(cfg.total_vocab, cfg.model_dim, bias=False)
+                nn.init.zeros_(self.self_cond_proj.weight)
 
     def forward_logits(self, xt: Tensor, sigma: Tensor, self_condition_logits: Tensor | None = None) -> Tensor:
         x = self.tok_emb(xt)
-        if self.self_cond_proj is not None and self_condition_logits is not None:
+        if self.self_cond_gate is not None and self_condition_logits is not None:
             probs = torch.softmax(self_condition_logits.detach().float(), dim=-1).to(dtype=x.dtype)
-            x = x + self.self_cond_proj(probs)
+            if self.self_cond_proj is not None:
+                self_cond = self.self_cond_proj(probs)
+            else:
+                self_cond = self.self_cond_up(self.self_cond_down(probs))
+            gate = torch.sigmoid(self.self_cond_gate).to(dtype=x.dtype)
+            x = x + gate * self_cond
         cond = F.silu(self.sigma_map(sigma)).to(dtype=x.dtype)
         for block in self.blocks:
             x = block(x, cond)
@@ -511,6 +533,8 @@ def main() -> None:
         num_heads=args.num_heads,
         mlp_mult=args.mlp_mult,
         self_condition=args.self_condition,
+        self_cond_gate_init=args.self_cond_gate_init,
+        self_cond_rank=args.self_cond_rank,
     )
     sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
     if int(sp.vocab_size()) != args.vocab_size:
@@ -538,7 +562,9 @@ def main() -> None:
     log(f"device:{device} compute_dtype:{compute_dtype}")
     log(f"model_params:{n_params}")
     log(
-        f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
+        f"diffusion:self_condition:{args.self_condition} "
+        f"self_cond_gate_init:{args.self_cond_gate_init} self_cond_rank:{args.self_cond_rank} "
+        f"mask_pattern:{args.mask_pattern} "
         f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
     )
     log(
@@ -614,6 +640,13 @@ def main() -> None:
         "model_params": n_params,
         "compressed_state_zlib_bytes": bytes_zlib,
         "self_condition": args.self_condition,
+        "self_cond_gate_init": args.self_cond_gate_init,
+        "self_cond_rank": args.self_cond_rank,
+        "self_cond_gate": (
+            float(torch.sigmoid(model.self_cond_gate.detach()).cpu().item())
+            if model.self_cond_gate is not None
+            else None
+        ),
         "mask_pattern": args.mask_pattern,
         "eval_steps": args.eval_steps,
     }

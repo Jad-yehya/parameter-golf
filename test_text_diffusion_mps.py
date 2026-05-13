@@ -89,6 +89,49 @@ class TextDiffusionHarnessTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         loss.backward()
 
+    def test_self_condition_gate_initializes_small(self):
+        cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+            self_condition=True,
+            self_cond_gate_init=-4.0,
+            self_cond_rank=8,
+        )
+        model = td.DiffusionLM(cfg)
+        self.assertLess(float(torch.sigmoid(model.self_cond_gate.detach())), 0.02)
+        self.assertEqual(model.self_cond_down.out_features, 8)
+        self.assertEqual(model.self_cond_up.in_features, 8)
+
+    def test_low_rank_self_condition_forward_and_backward_work(self):
+        cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+            self_condition=True,
+            self_cond_gate_init=-4.0,
+            self_cond_rank=4,
+        )
+        model = td.DiffusionLM(cfg)
+        x0 = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
+        sigma = torch.full((2,), 0.4)
+        self_cond_logits = torch.randn(2, cfg.seq_len, cfg.total_vocab)
+        logits = model.forward_logits(x0, sigma, self_condition_logits=self_cond_logits)
+        self.assertEqual(logits.shape, (2, cfg.seq_len, cfg.total_vocab))
+        loss = logits.square().mean()
+        loss.backward()
+        self.assertIsNotNone(model.self_cond_up.weight.grad)
+
 
 if __name__ == "__main__":
     unittest.main()

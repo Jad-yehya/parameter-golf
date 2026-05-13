@@ -1,0 +1,16 @@
+{
+  "run_id": "gated_rank16_gate-4_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.23617166710635,
+  "bits_per_token": 8.610302448272705,
+  "train_loss": 9.300990676879882,
+  "train_seconds": 5.908957666993956,
+  "model_params": 822929,
+  "compressed_state_zlib_bytes": 2874707,
+  "self_condition": true,
+  "self_cond_gate_init": -4.0,
+  "self_cond_rank": 16,
+  "self_cond_gate": 0.018294166773557663,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

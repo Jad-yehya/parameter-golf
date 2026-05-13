@@ -1,0 +1,14 @@
+run_id:gated_rank16_gate-4_cpu32_seed42
+device:cpu compute_dtype:torch.float32
+model_params:822929
+diffusion:self_condition:True self_cond_gate_init:-4.0 self_cond_rank:16 mask_pattern:independent noise_eps:0.1 eval_steps:32
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:11.7580 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:8.9402 lr:2.400e-04 elapsed:0.2s
+step:3/80 train_loss:8.0040 lr:3.600e-04 elapsed:0.3s
+step:4/80 train_loss:9.4200 lr:4.800e-04 elapsed:0.3s
+step:5/80 train_loss:8.7321 lr:6.000e-04 elapsed:0.4s
+step:50/80 train_loss:8.3596 lr:6.000e-04 elapsed:3.4s
+compressed_state_zlib_bytes:2874707
+final_var_bpb:3.23617167 bits_per_token:8.61030245 train_seconds:5.91
