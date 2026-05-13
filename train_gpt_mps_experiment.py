@@ -80,6 +80,9 @@ class Hyperparameters:
     attn_out_gate_width = int(os.environ.get("ATTN_OUT_GATE_WIDTH", "12"))
     sparse_attn_gate = bool(int(os.environ.get("SPARSE_ATTN_GATE", "0")))
     sparse_attn_gate_scale = float(os.environ.get("SPARSE_ATTN_GATE_SCALE", "1.0"))
+    random_map_adapter = bool(int(os.environ.get("RANDOM_MAP_ADAPTER", "0")))
+    random_map_dim = int(os.environ.get("RANDOM_MAP_DIM", "64"))
+    random_map_seed = int(os.environ.get("RANDOM_MAP_SEED", "20260513"))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -764,6 +767,9 @@ class Block(nn.Module):
         attn_out_gate_width: int,
         sparse_attn_gate: bool,
         sparse_attn_gate_scale: float,
+        random_map_adapter: bool = False,
+        random_map_dim: int = 64,
+        random_map_seed: int = 0,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
@@ -786,6 +792,15 @@ class Block(nn.Module):
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
+        self.random_map_adapter = random_map_adapter
+        if random_map_adapter:
+            gen = torch.Generator(device="cpu")
+            gen.manual_seed(random_map_seed)
+            random_map = torch.randn(dim, random_map_dim, generator=gen, dtype=torch.float32)
+            random_map = random_map / math.sqrt(dim)
+            self.register_buffer("random_map_in", random_map, persistent=False)
+            self.random_map_out = nn.Parameter(torch.zeros(random_map_dim, dim, dtype=torch.float32))
+            self.random_map_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
 
     def forward(self, x: Tensor, x0: Tensor) -> Tensor:
         mix = self.resid_mix.to(dtype=x.dtype)
@@ -793,6 +808,11 @@ class Block(nn.Module):
         attn_out = self.attn(self.attn_norm(x))
         x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out
         x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * self.mlp(self.mlp_norm(x))
+        if self.random_map_adapter:
+            features = torch.sin(x @ self.random_map_in.to(dtype=x.dtype))
+            x = x + self.random_map_scale.to(dtype=x.dtype)[None, None, :] * (
+                features @ self.random_map_out.to(dtype=x.dtype)
+            )
         return x
 
     def parallel_forward(self, lane_attn: Tensor, lane_mlp: Tensor, x0: Tensor) -> tuple[Tensor, Tensor]:
@@ -831,6 +851,9 @@ class GPT(nn.Module):
         attn_out_gate_width: int = 12,
         sparse_attn_gate: bool = False,
         sparse_attn_gate_scale: float = 1.0,
+        random_map_adapter: bool = False,
+        random_map_dim: int = 64,
+        random_map_seed: int = 0,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -863,6 +886,9 @@ class GPT(nn.Module):
                     attn_out_gate_width,
                     sparse_attn_gate,
                     sparse_attn_gate_scale,
+                    random_map_adapter,
+                    random_map_dim,
+                    random_map_seed + i,
                 )
                 for i in range(num_layers)
             ]
@@ -1084,6 +1110,9 @@ def main() -> None:
         attn_out_gate_width=args.attn_out_gate_width,
         sparse_attn_gate=args.sparse_attn_gate,
         sparse_attn_gate_scale=args.sparse_attn_gate_scale,
+        random_map_adapter=args.random_map_adapter,
+        random_map_dim=args.random_map_dim,
+        random_map_seed=args.random_map_seed,
     ).to(device=device, dtype=compute_dtype)
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1161,6 +1190,10 @@ def main() -> None:
         f"attn_out_gate:{args.attn_out_gate} attn_out_gate_src:{args.attn_out_gate_src} "
         f"attn_out_gate_width:{args.attn_out_gate_width} "
         f"sparse_attn_gate:{args.sparse_attn_gate} sparse_attn_gate_scale:{args.sparse_attn_gate_scale}"
+    )
+    log0(
+        f"random_map_adapter:{args.random_map_adapter} random_map_dim:{args.random_map_dim} "
+        f"random_map_seed:{args.random_map_seed}"
     )
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
