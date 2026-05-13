@@ -1,0 +1,8 @@
+run_id:simpleloss_lr1e3_cpu32_seed42
+device:cpu compute_dtype:torch.float32
+model_params:804480
+diffusion:self_condition:False mask_pattern:independent noise_eps:0.1 eval_steps:32 loss_weighting:simple_mask_mean
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+compressed_state_zlib_bytes:2806493
+final_var_bpb:3.32240707 bits_per_token:8.83974421 train_seconds:6.57

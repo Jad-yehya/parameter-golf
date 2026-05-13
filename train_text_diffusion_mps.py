@@ -68,6 +68,7 @@ class Hyperparameters:
     mlp_mult = float(os.environ.get("MLP_MULT", "2.0"))
     self_condition = bool(int(os.environ.get("SELF_CONDITION", "0")))
     mask_pattern = os.environ.get("MASK_PATTERN", "independent")
+    loss_weighting = os.environ.get("LOSS_WEIGHTING", "mdlm")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
 
@@ -334,6 +335,7 @@ def mdlm_loss(
     mask_pattern: str = "independent",
     eps: float = 0.1,
     span_len: int = 4,
+    loss_weighting: str = "mdlm",
 ) -> Tensor:
     bsz = x0.shape[0]
     t = torch.rand(bsz // 2 + 1, device=x0.device)
@@ -348,6 +350,11 @@ def mdlm_loss(
             self_condition_logits = model.forward_logits(xt, sigma)
     log_probs = model.subs_log_probs(xt, sigma, self_condition_logits=self_condition_logits)
     log_p_x0 = torch.gather(log_probs, -1, x0[..., None]).squeeze(-1)
+    if loss_weighting == "simple_mask_mean":
+        denom = mask.float().sum().clamp_min(1.0)
+        return ((-log_p_x0) * mask.float()).sum() / denom
+    if loss_weighting != "mdlm":
+        raise ValueError(f"Unsupported LOSS_WEIGHTING={loss_weighting!r}")
     dsigma = (1.0 - eps) / alpha
     loss = (dsigma[:, None] * (-log_p_x0) * mask.float()).sum() / (x0.numel())
     return loss
@@ -540,6 +547,7 @@ def main() -> None:
     log(
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
         f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
+        f" loss_weighting:{args.loss_weighting}"
     )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "
@@ -562,6 +570,7 @@ def main() -> None:
                 mask_pattern=args.mask_pattern,
                 eps=args.noise_eps,
                 span_len=args.span_len,
+                loss_weighting=args.loss_weighting,
             )
         loss.backward()
         if args.grad_clip_norm > 0:
@@ -616,6 +625,7 @@ def main() -> None:
         "self_condition": args.self_condition,
         "mask_pattern": args.mask_pattern,
         "eval_steps": args.eval_steps,
+        "loss_weighting": args.loss_weighting,
     }
     log(f"compressed_state_zlib_bytes:{bytes_zlib}")
     log(f"final_var_bpb:{bpb:.8f} bits_per_token:{bits_per_token:.8f} train_seconds:{train_time:.2f}")

@@ -1,0 +1,14 @@
+{
+  "run_id": "simpleloss_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.321619183279042,
+  "bits_per_token": 8.837647914886475,
+  "train_loss": 6.005025696754456,
+  "train_seconds": 5.102821332999156,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2806428,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32,
+  "loss_weighting": "simple_mask_mean"
+}

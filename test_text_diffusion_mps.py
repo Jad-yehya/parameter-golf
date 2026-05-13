@@ -89,6 +89,23 @@ class TextDiffusionHarnessTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         loss.backward()
 
+    def test_simple_mask_mean_loss_is_finite(self):
+        cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+        )
+        model = td.DiffusionLM(cfg)
+        x0 = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
+        loss = td.mdlm_loss(model, x0, mask_pattern="independent", loss_weighting="simple_mask_mean")
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+
 
 if __name__ == "__main__":
     unittest.main()
