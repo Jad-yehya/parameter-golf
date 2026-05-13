@@ -44,8 +44,9 @@ Metric: `final_var_bpb` from the discrete variational eval.
 | simple CE, `NOISE_EPS=0.05` | 3.30094564 | 3.24603770 | 3.25019719 | 3.26572684 | -0.02730239 |
 | simple CE, `NOISE_EPS=0.02` | 3.29112867 | 3.22826463 | 3.23175030 | 3.25038120 | -0.04264804 |
 | simple CE, `NOISE_EPS=0.01` | 3.28550308 | 3.22182472 | 3.22851567 | 3.24528116 | -0.04774808 |
+| simple CE, `NOISE_EPS=0.00001`, `WARMDOWN_STEPS=60` | 3.27515881 | 3.22082567 | 3.21929975 | 3.23842808 | -0.05460116 |
 
-Best local result: `LOSS_WEIGHTING=simple_mask_mean NOISE_EPS=0.01`.
+Best local result: `LOSS_WEIGHTING=simple_mask_mean NOISE_EPS=0.00001 WARMDOWN_STEPS=60`.
 
 ## One-Seed Side Probes
 
@@ -56,7 +57,7 @@ Best local result: `LOSS_WEIGHTING=simple_mask_mean NOISE_EPS=0.01`.
 | simple CE, `NOISE_EPS=0.2` | 3.36413760 |
 | simple CE, `NOISE_EPS=0.005` | 3.28126053 |
 
-The epsilon sweep is the important signal. Lowering from `0.1` to `0.01` helps, but `0.005` is worse on seed 42, so `0.01` is the current local choice.
+The epsilon sweep is the important signal. Lowering from `0.1` to `0.01` helps, `0.005` is worse on seed 42, and the separate hparam sweep found that pushing to `1e-5` with a longer warmdown helps further.
 
 ## Example Command
 
@@ -67,7 +68,7 @@ COMPUTE_DTYPE=float32 \
 DATA_PATH=/private/tmp/parameter-golf-worktrees/pg-strong-search/data/datasets/fineweb10B_sp1024_screen \
 TOKENIZER_PATH=/private/tmp/parameter-golf-worktrees/pg-strong-search/data/tokenizers/fineweb_1024_bpe.model \
 OUT_DIR=logs_textdiff_loss \
-RUN_ID=simpleloss_eps001_cpu32_seed42 \
+RUN_ID=simpleloss_eps1e5_warm60_cpu32_seed42 \
 SEED=42 \
 NUM_LAYERS=2 \
 MODEL_DIM=128 \
@@ -82,8 +83,8 @@ TRAIN_LOG_EVERY=0 \
 VAL_SEQS=8 \
 DIFFUSION_EVAL_STEPS=32 \
 WARMUP_STEPS=5 \
-WARMDOWN_STEPS=20 \
-NOISE_EPS=0.01 \
+WARMDOWN_STEPS=60 \
+NOISE_EPS=0.00001 \
 MAX_WALLCLOCK_SECONDS=0 \
 SELF_CONDITION=0 \
 LOSS_WEIGHTING=simple_mask_mean \
@@ -92,7 +93,7 @@ LOSS_WEIGHTING=simple_mask_mean \
 
 ## Interpretation
 
-This is the first local text-diffusion branch in this thread that clearly improves over the plain local MDLM screen. The result is still far from competitive with the AR local screens, and because the schedule changes the variational eval path too, it needs more scrutiny before being treated as a real submission direction.
+This is the first local text-diffusion branch in this thread that clearly improves over the plain local MDLM screen. The result is still far from competitive with the AR local screens, and because lowering `NOISE_EPS` changes the variational eval path too, it needs more scrutiny before being treated as a real submission direction.
 
 Next useful checks:
 
