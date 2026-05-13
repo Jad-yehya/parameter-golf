@@ -155,3 +155,5 @@ if [ "${#FAILED_SEEDS[@]}" -ne 0 ]; then
   echo "ERROR: incomplete or failed validation: ${FAILED_SEEDS[*]}"
   exit 1
 fi
+
+python3 summarize_validation.py $(for SEED in $SEEDS; do printf 'train_seed%s.log ' "$SEED"; done)

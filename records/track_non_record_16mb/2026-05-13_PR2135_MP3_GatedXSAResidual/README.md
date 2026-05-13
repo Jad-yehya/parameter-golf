@@ -37,6 +37,7 @@ bash validate_8xh100.sh
 ```
 
 If data is already prepared, `validate_8xh100.sh` skips preparation and delegates to `run_3seed.sh`.
+At the end of a complete run, `run_3seed.sh` calls `summarize_validation.py` and writes `validation_summary.json` with the 3-seed aggregate and budget checks.
 
 Expected validation protocol before PR:
 
