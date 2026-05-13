@@ -1,0 +1,16 @@
+{
+  "run_id": "segment_blocks_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.296240073078202,
+  "bits_per_token": 8.77012312412262,
+  "train_loss": 7.682908082008362,
+  "train_seconds": 4.188874957995722,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2793862,
+  "self_condition": false,
+  "mask_pattern": "segment_blocks",
+  "span_len": 4,
+  "boundary_mask_bias": 4.0,
+  "mask_boundary_token_ids": [],
+  "eval_steps": 32
+}

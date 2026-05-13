@@ -1,0 +1,16 @@
+{
+  "run_id": "multi_span_cpu32_seed0",
+  "seed": 0,
+  "val_var_bpb": 3.303101594042485,
+  "bits_per_token": 8.788379192352295,
+  "train_loss": 9.15526647567749,
+  "train_seconds": 4.106657541007735,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2800125,
+  "self_condition": false,
+  "mask_pattern": "multi_span",
+  "span_len": 4,
+  "boundary_mask_bias": 4.0,
+  "mask_boundary_token_ids": [],
+  "eval_steps": 32
+}

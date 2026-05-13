@@ -68,6 +68,53 @@ class TextDiffusionHarnessTests(unittest.TestCase):
                 gaps = idx[1:] - idx[:-1]
                 self.assertLessEqual(int(gaps.max()), 3)
 
+    def test_make_corrupted_batch_supports_multi_span_masking(self):
+        x0 = torch.arange(64).reshape(2, 32)
+        t = torch.full((2,), 0.55)
+        torch.manual_seed(7)
+        xt, mask = td.make_corrupted_batch(
+            x0, t, mask_id=99, eps=0.1, pattern="multi_span", span_len=3
+        )
+        self.assertEqual(xt.shape, x0.shape)
+        self.assertEqual(mask.shape, x0.shape)
+        self.assertTrue(torch.equal(xt[mask], torch.full_like(xt[mask], 99)))
+        for row in mask:
+            idx = row.nonzero(as_tuple=False).flatten()
+            self.assertGreaterEqual(idx.numel(), 6)
+            if idx.numel() > 1:
+                self.assertGreater(int((idx[1:] - idx[:-1]).max()), 1)
+
+    def test_make_corrupted_batch_supports_segment_block_masking(self):
+        x0 = torch.arange(96).reshape(3, 32)
+        t = torch.full((3,), 0.4)
+        torch.manual_seed(11)
+        xt, mask = td.make_corrupted_batch(
+            x0, t, mask_id=99, eps=0.1, pattern="segment_blocks", span_len=4
+        )
+        self.assertEqual(xt.shape, x0.shape)
+        self.assertTrue(torch.equal(xt[mask], torch.full_like(xt[mask], 99)))
+        self.assertTrue(all(int(row.sum()) > 0 for row in mask))
+        for row in mask:
+            starts = row & ~torch.cat([row.new_zeros(1), row[:-1]])
+            self.assertGreaterEqual(int(starts.sum()), 1)
+
+    def test_boundary_biased_masking_uses_boundary_token_neighborhood(self):
+        x0 = torch.tensor([[1, 2, 7, 3, 4, 5, 7, 6, 8, 9, 7, 10]])
+        t = torch.full((1,), 0.25)
+        torch.manual_seed(5)
+        _, mask = td.make_corrupted_batch(
+            x0,
+            t,
+            mask_id=99,
+            eps=0.1,
+            pattern="boundary_biased",
+            span_len=2,
+            boundary_token_ids=torch.tensor([7]),
+            boundary_bias=100.0,
+        )
+        expected_positions = torch.tensor([2, 3, 6, 7, 10, 11])
+        self.assertTrue(mask[0, expected_positions].all())
+
     def test_tiny_model_forward_and_mdlm_loss_are_finite(self):
         cfg = td.ModelConfig(
             vocab_size=16,

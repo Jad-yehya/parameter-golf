@@ -69,6 +69,8 @@ class Hyperparameters:
     self_condition = bool(int(os.environ.get("SELF_CONDITION", "0")))
     mask_pattern = os.environ.get("MASK_PATTERN", "independent")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
+    mask_boundary_token_ids = os.environ.get("MASK_BOUNDARY_TOKEN_IDS", "")
+    boundary_mask_bias = float(os.environ.get("BOUNDARY_MASK_BIAS", "4.0"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
 
     lr = float(os.environ.get("LR", "6e-4"))
@@ -131,6 +133,106 @@ def log_linear_noise(t: Tensor, eps: float = 0.1) -> tuple[Tensor, Tensor]:
     return sigma, alpha
 
 
+def normalize_mask_pattern(pattern: str) -> str:
+    normalized = pattern.strip().lower().replace("-", "_")
+    aliases = {
+        "multi": "multi_span",
+        "multispan": "multi_span",
+        "sentence": "segment_blocks",
+        "sentence_blocks": "segment_blocks",
+        "sentenceish": "segment_blocks",
+        "sentence_ish": "segment_blocks",
+        "boundary": "boundary_biased",
+        "boundary_bias": "boundary_biased",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def parse_token_id_list(raw: str) -> list[int]:
+    if not raw.strip():
+        return []
+    return [int(part.strip()) for part in raw.split(",") if part.strip()]
+
+
+def infer_boundary_token_ids(sp: spm.SentencePieceProcessor, vocab_size: int) -> list[int]:
+    boundary_ids: list[int] = []
+    for token_id in range(min(vocab_size, int(sp.vocab_size()))):
+        if sp.is_control(token_id) or sp.is_unknown(token_id) or sp.is_unused(token_id) or sp.is_byte(token_id):
+            continue
+        piece = sp.id_to_piece(token_id).replace("\u2581", "")
+        if not piece:
+            continue
+        if piece in {".", "!", "?", ";", ":"} or (
+            len(piece) <= 4 and piece[-1] in {".", "!", "?"}
+        ):
+            boundary_ids.append(token_id)
+    return boundary_ids
+
+
+def _target_mask_count(chance: Tensor, seq_len: int, floor: int = 1) -> int:
+    count = int(round(float(chance) * seq_len))
+    return min(seq_len, max(floor, count))
+
+
+def _paint_span(mask: Tensor, row: int, start: int, width: int) -> None:
+    seq_len = mask.shape[1]
+    if width <= 0 or seq_len <= 0:
+        return
+    start = min(max(start, 0), seq_len - 1)
+    end = min(seq_len, start + width)
+    mask[row, start:end] = True
+
+
+def _make_multi_span_mask(
+    x0: Tensor, move_chance: Tensor, span_len: int, segment_scale: int = 1
+) -> Tensor:
+    mask = torch.zeros_like(x0, dtype=torch.bool)
+    seq_len = x0.shape[1]
+    span_len = max(1, int(span_len))
+    for row, chance in enumerate(move_chance.detach().cpu()):
+        target = _target_mask_count(chance, seq_len)
+        avg_width = max(1, span_len * max(1, segment_scale))
+        span_count = min(seq_len, max(2 if target > span_len else 1, math.ceil(target / avg_width)))
+        painted = 0
+        for span_idx in range(span_count):
+            remaining = target - painted
+            if remaining <= 0:
+                break
+            remaining_spans = span_count - span_idx
+            width_cap = min(seq_len, max(span_len, avg_width), remaining)
+            width_floor = max(1, math.ceil(remaining / remaining_spans))
+            width = min(width_cap, width_floor)
+            seg_start = (span_idx * seq_len) // span_count
+            seg_end = ((span_idx + 1) * seq_len) // span_count
+            if seg_end <= seg_start:
+                seg_start, seg_end = 0, seq_len
+            width = min(width, seg_end - seg_start)
+            if width <= 0:
+                continue
+            max_start = max(seg_start, seg_end - width)
+            start = int(torch.randint(seg_start, max_start + 1, (1,)).item())
+            _paint_span(mask, row, start, width)
+            painted += width
+    return mask
+
+
+def _boundary_neighborhood_mask(x0: Tensor, boundary_token_ids: Tensor | list[int] | None) -> Tensor:
+    if boundary_token_ids is None:
+        return torch.zeros_like(x0, dtype=torch.bool)
+    if not isinstance(boundary_token_ids, Tensor):
+        if len(boundary_token_ids) == 0:
+            return torch.zeros_like(x0, dtype=torch.bool)
+        boundary_token_ids = torch.tensor(boundary_token_ids, dtype=x0.dtype, device=x0.device)
+    else:
+        boundary_token_ids = boundary_token_ids.to(device=x0.device, dtype=x0.dtype)
+    if boundary_token_ids.numel() == 0:
+        return torch.zeros_like(x0, dtype=torch.bool)
+    hits = torch.isin(x0, boundary_token_ids)
+    neighborhood = hits.clone()
+    neighborhood[:, 1:] |= hits[:, :-1]
+    return neighborhood
+
+
 def make_corrupted_batch(
     x0: Tensor,
     t: Tensor,
@@ -138,9 +240,12 @@ def make_corrupted_batch(
     eps: float,
     pattern: str = "independent",
     span_len: int = 4,
+    boundary_token_ids: Tensor | list[int] | None = None,
+    boundary_bias: float = 4.0,
 ) -> tuple[Tensor, Tensor]:
     _, alpha = log_linear_noise(t, eps=eps)
     move_chance = 1.0 - alpha
+    pattern = normalize_mask_pattern(pattern)
     if pattern == "independent":
         mask = torch.rand_like(x0.float()) < move_chance[:, None]
     elif pattern == "span":
@@ -151,6 +256,19 @@ def make_corrupted_batch(
             width = min(seq_len, max(width, span_len))
             start = int(torch.randint(0, seq_len - width + 1, (1,)).item())
             mask[row, start : start + width] = True
+    elif pattern == "multi_span":
+        mask = _make_multi_span_mask(x0, move_chance, span_len=span_len, segment_scale=1)
+    elif pattern == "segment_blocks":
+        mask = _make_multi_span_mask(x0, move_chance, span_len=span_len, segment_scale=3)
+    elif pattern == "boundary_biased":
+        boundary_neighborhood = _boundary_neighborhood_mask(x0, boundary_token_ids)
+        multiplier = torch.where(
+            boundary_neighborhood,
+            torch.full_like(x0.float(), 1.0 + max(0.0, float(boundary_bias))),
+            torch.ones_like(x0.float()),
+        )
+        probs = (move_chance[:, None] * multiplier).clamp(max=1.0)
+        mask = torch.rand_like(x0.float()) < probs
     else:
         raise ValueError(f"Unsupported MASK_PATTERN={pattern!r}")
     xt = torch.where(mask, torch.full_like(x0, mask_id), x0)
@@ -334,13 +452,22 @@ def mdlm_loss(
     mask_pattern: str = "independent",
     eps: float = 0.1,
     span_len: int = 4,
+    boundary_token_ids: Tensor | list[int] | None = None,
+    boundary_bias: float = 4.0,
 ) -> Tensor:
     bsz = x0.shape[0]
     t = torch.rand(bsz // 2 + 1, device=x0.device)
     t = torch.cat((t, 1.0 - t))[:bsz].clamp(1e-5, 1.0 - 1e-5)
     sigma, alpha = log_linear_noise(t, eps=eps)
     xt, mask = make_corrupted_batch(
-        x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
+        x0,
+        t,
+        mask_id=model.cfg.mask_id,
+        eps=eps,
+        pattern=mask_pattern,
+        span_len=span_len,
+        boundary_token_ids=boundary_token_ids,
+        boundary_bias=boundary_bias,
     )
     self_condition_logits = None
     if model.cfg.self_condition:
@@ -362,6 +489,8 @@ def variational_elbo_bits(
     mask_pattern: str,
     span_len: int,
     compute_dtype: torch.dtype,
+    boundary_token_ids: Tensor | list[int] | None = None,
+    boundary_bias: float = 4.0,
 ) -> Tensor:
     bsz, seq_len = x0.shape
     total_bits = torch.zeros(bsz, device=x0.device)
@@ -374,7 +503,14 @@ def variational_elbo_bits(
         t = torch.full((bsz,), float(t_grid[step]), device=x0.device)
         sigma = sigma_grid[step].expand(bsz)
         xt, mask = make_corrupted_batch(
-            x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
+            x0,
+            t,
+            mask_id=model.cfg.mask_id,
+            eps=eps,
+            pattern=mask_pattern,
+            span_len=span_len,
+            boundary_token_ids=boundary_token_ids,
+            boundary_bias=boundary_bias,
         )
         self_condition_logits = None
         if model.cfg.self_condition:
@@ -454,6 +590,7 @@ def evaluate_bpb(
     base_bytes_lut: Tensor,
     has_leading_space_lut: Tensor,
     is_boundary_token_lut: Tensor,
+    mask_boundary_token_ids: Tensor | list[int] | None,
     device: torch.device,
     compute_dtype: torch.dtype,
 ) -> tuple[float, float]:
@@ -472,6 +609,8 @@ def evaluate_bpb(
             mask_pattern=args.mask_pattern,
             span_len=args.span_len,
             compute_dtype=compute_dtype,
+            boundary_token_ids=mask_boundary_token_ids,
+            boundary_bias=args.boundary_mask_bias,
         )
         bytes_ = count_sequence_bytes(x0, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut)
         total_bits += float(bits.sum().item())
@@ -482,6 +621,7 @@ def evaluate_bpb(
 
 def main() -> None:
     args = Hyperparameters()
+    args.mask_pattern = normalize_mask_pattern(args.mask_pattern)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -515,6 +655,12 @@ def main() -> None:
     sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
     if int(sp.vocab_size()) != args.vocab_size:
         raise ValueError(f"VOCAB_SIZE={args.vocab_size} does not match tokenizer vocab={sp.vocab_size()}")
+    boundary_ids = parse_token_id_list(args.mask_boundary_token_ids)
+    if args.mask_pattern == "boundary_biased" and not boundary_ids:
+        boundary_ids = infer_boundary_token_ids(sp, args.vocab_size)
+    mask_boundary_token_ids = (
+        torch.tensor(boundary_ids, dtype=torch.long, device=device) if boundary_ids else None
+    )
     train_tokens = load_tokens(os.path.join(args.data_path, "fineweb_train_*.bin"), args.max_train_tokens)
     val_tokens = load_tokens(os.path.join(args.data_path, "fineweb_val_*.bin"), args.max_val_tokens)
     base_bytes_lut, has_leading_space_lut, is_boundary_token_lut = build_sentencepiece_luts(
@@ -541,6 +687,12 @@ def main() -> None:
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
         f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
     )
+    if args.mask_pattern == "boundary_biased":
+        preview = boundary_ids[:20]
+        log(
+            f"mask_boundary:ids_count:{len(boundary_ids)} ids_preview:{preview} "
+            f"boundary_mask_bias:{args.boundary_mask_bias}"
+        )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "
         f"seq_len:{args.train_seq_len} batch_seqs:{batch_seqs}"
@@ -562,6 +714,8 @@ def main() -> None:
                 mask_pattern=args.mask_pattern,
                 eps=args.noise_eps,
                 span_len=args.span_len,
+                boundary_token_ids=mask_boundary_token_ids,
+                boundary_bias=args.boundary_mask_bias,
             )
         loss.backward()
         if args.grad_clip_norm > 0:
@@ -583,6 +737,7 @@ def main() -> None:
                 base_bytes_lut,
                 has_leading_space_lut,
                 is_boundary_token_lut,
+                mask_boundary_token_ids,
                 device,
                 compute_dtype,
             )
@@ -600,6 +755,7 @@ def main() -> None:
         base_bytes_lut,
         has_leading_space_lut,
         is_boundary_token_lut,
+        mask_boundary_token_ids,
         device,
         compute_dtype,
     )
@@ -615,6 +771,9 @@ def main() -> None:
         "compressed_state_zlib_bytes": bytes_zlib,
         "self_condition": args.self_condition,
         "mask_pattern": args.mask_pattern,
+        "span_len": args.span_len,
+        "boundary_mask_bias": args.boundary_mask_bias,
+        "mask_boundary_token_ids": boundary_ids,
         "eval_steps": args.eval_steps,
     }
     log(f"compressed_state_zlib_bytes:{bytes_zlib}")

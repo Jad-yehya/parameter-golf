@@ -1,0 +1,25 @@
+{
+  "run_id": "boundary_biased_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.5473582631274088,
+  "bits_per_token": 9.438259363174438,
+  "train_loss": 9.437714004516602,
+  "train_seconds": 4.892829666001489,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2809821,
+  "self_condition": false,
+  "mask_pattern": "boundary_biased",
+  "span_len": 4,
+  "boundary_mask_bias": 4.0,
+  "mask_boundary_token_ids": [
+    475,
+    702,
+    853,
+    960,
+    987,
+    1009,
+    1013,
+    1015
+  ],
+  "eval_steps": 32
+}
