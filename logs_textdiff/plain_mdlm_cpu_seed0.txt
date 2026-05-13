@@ -1,0 +1,17 @@
+run_id:plain_mdlm_cpu_seed0
+device:cpu compute_dtype:torch.float32
+model_params:804480
+diffusion:self_condition:False mask_pattern:independent noise_eps:0.1 eval_steps:8
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:5.8560 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:7.3336 lr:2.400e-04 elapsed:0.2s
+step:3/80 train_loss:11.9804 lr:3.600e-04 elapsed:0.2s
+step:4/80 train_loss:11.4772 lr:4.800e-04 elapsed:0.3s
+step:5/80 train_loss:11.1766 lr:6.000e-04 elapsed:0.4s
+step:20/80 train_loss:8.7897 lr:6.000e-04 elapsed:1.4s
+step:40/80 train_loss:8.8861 lr:6.000e-04 elapsed:2.9s
+step:60/80 train_loss:7.7917 lr:6.000e-04 elapsed:4.3s
+step:80/80 train_loss:7.7069 lr:6.332e-05 elapsed:5.8s
+compressed_state_zlib_bytes:2796625
+final_var_bpb:3.31458530 bits_per_token:8.81893325 train_seconds:5.76

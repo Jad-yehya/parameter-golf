@@ -1,0 +1,17 @@
+run_id:span_mdlm_cpu_seed0
+device:cpu compute_dtype:torch.float32
+model_params:804480
+diffusion:self_condition:False mask_pattern:span noise_eps:0.1 eval_steps:8
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:5.7788 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:5.1955 lr:2.400e-04 elapsed:0.1s
+step:3/80 train_loss:6.7375 lr:3.600e-04 elapsed:0.2s
+step:4/80 train_loss:6.8405 lr:4.800e-04 elapsed:0.2s
+step:5/80 train_loss:6.7218 lr:6.000e-04 elapsed:0.3s
+step:20/80 train_loss:8.2455 lr:6.000e-04 elapsed:1.2s
+step:40/80 train_loss:8.3739 lr:6.000e-04 elapsed:2.3s
+step:60/80 train_loss:8.2946 lr:6.000e-04 elapsed:3.5s
+step:80/80 train_loss:9.6115 lr:6.332e-05 elapsed:4.7s
+compressed_state_zlib_bytes:2791379
+final_var_bpb:3.31047904 bits_per_token:8.80800796 train_seconds:4.65

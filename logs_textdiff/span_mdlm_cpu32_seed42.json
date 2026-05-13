@@ -1,0 +1,13 @@
+{
+  "run_id": "span_mdlm_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.297016448330542,
+  "bits_per_token": 8.772188782691956,
+  "train_loss": 7.995081114768982,
+  "train_seconds": 5.8573387500073295,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2807019,
+  "self_condition": false,
+  "mask_pattern": "span",
+  "eval_steps": 32
+}

@@ -1,0 +1,17 @@
+run_id:selfcond_mdlm_cpu_seed42
+device:cpu compute_dtype:torch.float32
+model_params:935680
+diffusion:self_condition:True mask_pattern:independent noise_eps:0.1 eval_steps:8
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:10.1434 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:11.2444 lr:2.400e-04 elapsed:0.1s
+step:3/80 train_loss:10.6931 lr:3.600e-04 elapsed:0.2s
+step:4/80 train_loss:10.2593 lr:4.800e-04 elapsed:0.2s
+step:5/80 train_loss:10.2919 lr:6.000e-04 elapsed:0.3s
+step:20/80 train_loss:8.3640 lr:6.000e-04 elapsed:1.0s
+step:40/80 train_loss:8.5519 lr:6.000e-04 elapsed:2.0s
+step:60/80 train_loss:8.7568 lr:6.000e-04 elapsed:2.9s
+step:80/80 train_loss:8.2618 lr:6.332e-05 elapsed:3.9s
+compressed_state_zlib_bytes:3171681
+final_var_bpb:3.35268916 bits_per_token:8.92031407 train_seconds:3.88

@@ -1,0 +1,13 @@
+{
+  "run_id": "smoke_textdiff_cpu",
+  "seed": 7,
+  "val_var_bpb": 3.966381377457453,
+  "bits_per_token": 9.90045976638794,
+  "train_loss": 14.222139358520508,
+  "train_seconds": 0.02596883400110528,
+  "model_params": 287360,
+  "compressed_state_zlib_bytes": 470681,
+  "self_condition": true,
+  "mask_pattern": "independent",
+  "eval_steps": 2
+}

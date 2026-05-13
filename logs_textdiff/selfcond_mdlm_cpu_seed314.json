@@ -1,0 +1,13 @@
+{
+  "run_id": "selfcond_mdlm_cpu_seed314",
+  "seed": 314,
+  "val_var_bpb": 3.3416662693986283,
+  "bits_per_token": 8.89098608493805,
+  "train_loss": 8.95667839050293,
+  "train_seconds": 7.203833499996108,
+  "model_params": 935680,
+  "compressed_state_zlib_bytes": 3174084,
+  "self_condition": true,
+  "mask_pattern": "independent",
+  "eval_steps": 8
+}
