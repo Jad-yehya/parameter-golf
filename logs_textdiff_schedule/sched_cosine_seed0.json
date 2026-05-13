@@ -1,0 +1,15 @@
+{
+  "run_id": "sched_cosine_seed0",
+  "seed": 0,
+  "val_var_bpb": 3.2612052437230457,
+  "bits_per_token": 8.676907896995544,
+  "train_loss": 7.915599703788757,
+  "train_seconds": 5.066023708990542,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2806593,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "noise_schedule": "cosine",
+  "noise_power": 2.0,
+  "eval_steps": 32
+}

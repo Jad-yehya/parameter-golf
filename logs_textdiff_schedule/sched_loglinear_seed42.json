@@ -1,0 +1,15 @@
+{
+  "run_id": "sched_loglinear_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.3264557573637363,
+  "bits_per_token": 8.850516319274902,
+  "train_loss": 9.20482861995697,
+  "train_seconds": 4.405386958998861,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2807358,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "noise_schedule": "loglinear",
+  "noise_power": 2.0,
+  "eval_steps": 32
+}

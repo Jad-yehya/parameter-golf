@@ -1,0 +1,15 @@
+{
+  "run_id": "sched_power_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.313985274677693,
+  "bits_per_token": 8.817336797714233,
+  "train_loss": 9.325070703029633,
+  "train_seconds": 9.718845958006568,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2805139,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "noise_schedule": "power",
+  "noise_power": 2.0,
+  "eval_steps": 32
+}
