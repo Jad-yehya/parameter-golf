@@ -80,6 +80,10 @@ class Hyperparameters:
     attn_out_gate_width = int(os.environ.get("ATTN_OUT_GATE_WIDTH", "12"))
     sparse_attn_gate = bool(int(os.environ.get("SPARSE_ATTN_GATE", "0")))
     sparse_attn_gate_scale = float(os.environ.get("SPARSE_ATTN_GATE_SCALE", "1.0"))
+    causal_conv_memory = bool(int(os.environ.get("CAUSAL_CONV_MEMORY", "0")))
+    conv_kernel = int(os.environ.get("CONV_KERNEL", "5"))
+    conv_dilation = int(os.environ.get("CONV_DILATION", "1"))
+    conv_start_layer = int(os.environ.get("CONV_START_LAYER", "-1"))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -764,6 +768,9 @@ class Block(nn.Module):
         attn_out_gate_width: int,
         sparse_attn_gate: bool,
         sparse_attn_gate_scale: float,
+        causal_conv_memory: bool = False,
+        conv_kernel: int = 5,
+        conv_dilation: int = 1,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
@@ -786,6 +793,22 @@ class Block(nn.Module):
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
+        self.causal_conv_memory = causal_conv_memory
+        self.conv_dilation = conv_dilation
+        if causal_conv_memory:
+            self.conv_memory_weight = nn.Parameter(torch.zeros(dim, conv_kernel, dtype=torch.float32))
+            self.conv_memory_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
+
+    def _causal_conv_memory(self, x: Tensor) -> Tensor:
+        pad = (self.conv_memory_weight.size(1) - 1) * self.conv_dilation
+        xt = F.pad(x.transpose(1, 2), (pad, 0))
+        yt = F.conv1d(
+            xt,
+            self.conv_memory_weight.to(dtype=x.dtype).unsqueeze(1),
+            groups=x.size(-1),
+            dilation=self.conv_dilation,
+        )
+        return yt.transpose(1, 2)
 
     def forward(self, x: Tensor, x0: Tensor) -> Tensor:
         mix = self.resid_mix.to(dtype=x.dtype)
@@ -793,6 +816,10 @@ class Block(nn.Module):
         attn_out = self.attn(self.attn_norm(x))
         x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out
         x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * self.mlp(self.mlp_norm(x))
+        if self.causal_conv_memory:
+            x = x + self.conv_memory_scale.to(dtype=x.dtype)[None, None, :] * self._causal_conv_memory(
+                self.mlp_norm(x)
+            )
         return x
 
     def parallel_forward(self, lane_attn: Tensor, lane_mlp: Tensor, x0: Tensor) -> tuple[Tensor, Tensor]:
@@ -831,6 +858,10 @@ class GPT(nn.Module):
         attn_out_gate_width: int = 12,
         sparse_attn_gate: bool = False,
         sparse_attn_gate_scale: float = 1.0,
+        causal_conv_memory: bool = False,
+        conv_kernel: int = 5,
+        conv_dilation: int = 1,
+        conv_start_layer: int = -1,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -847,6 +878,8 @@ class GPT(nn.Module):
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32))
+        if conv_start_layer < 0:
+            conv_start_layer = num_layers // 2
         self.blocks = nn.ModuleList(
             [
                 Block(
@@ -863,6 +896,9 @@ class GPT(nn.Module):
                     attn_out_gate_width,
                     sparse_attn_gate,
                     sparse_attn_gate_scale,
+                    causal_conv_memory and i >= conv_start_layer,
+                    conv_kernel,
+                    conv_dilation,
                 )
                 for i in range(num_layers)
             ]
@@ -1084,6 +1120,10 @@ def main() -> None:
         attn_out_gate_width=args.attn_out_gate_width,
         sparse_attn_gate=args.sparse_attn_gate,
         sparse_attn_gate_scale=args.sparse_attn_gate_scale,
+        causal_conv_memory=args.causal_conv_memory,
+        conv_kernel=args.conv_kernel,
+        conv_dilation=args.conv_dilation,
+        conv_start_layer=args.conv_start_layer,
     ).to(device=device, dtype=compute_dtype)
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1161,6 +1201,11 @@ def main() -> None:
         f"attn_out_gate:{args.attn_out_gate} attn_out_gate_src:{args.attn_out_gate_src} "
         f"attn_out_gate_width:{args.attn_out_gate_width} "
         f"sparse_attn_gate:{args.sparse_attn_gate} sparse_attn_gate_scale:{args.sparse_attn_gate_scale}"
+    )
+    log0(
+        f"causal_conv_memory:{args.causal_conv_memory} conv_kernel:{args.conv_kernel} "
+        f"conv_dilation:{args.conv_dilation} "
+        f"conv_start_layer:{args.conv_start_layer if args.conv_start_layer >= 0 else args.num_layers // 2}"
     )
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
