@@ -33,8 +33,10 @@ python3 prepare_marker_pair_v3.py
 Then run the candidate:
 
 ```bash
-bash run_3seed.sh
+bash validate_8xh100.sh
 ```
+
+If data is already prepared, `validate_8xh100.sh` skips preparation and delegates to `run_3seed.sh`.
 
 Expected validation protocol before PR:
 
