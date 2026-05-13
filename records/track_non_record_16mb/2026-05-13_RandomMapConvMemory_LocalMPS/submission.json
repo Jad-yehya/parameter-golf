@@ -1,0 +1,58 @@
+{
+  "author": "Jad Yehya",
+  "github_id": "Jad-yehya",
+  "name": "Local MPS Random-Map Adapter + Causal Conv Memory Screen",
+  "blurb": "Local compact MPS screen combining AttnOutGate, QK gain 5.0, all-layer lightweight inter-head attention, fixed random sinusoidal residual adapters, and a causal depthwise convolution memory path. This is not official 8xH100 validation.",
+  "date": "2026-05-13",
+  "track": "non_record_local_mps_screen",
+  "official_validation": false,
+  "hardware": "Apple Silicon MPS",
+  "pytorch_version": "2.11.0",
+  "dataset": "fineweb10B_sp1024_screen, one train shard and 1M-token validation shard",
+  "val_loss": 4.61702617,
+  "val_bpb": 2.76627614,
+  "val_bpb_std": 0.00087985,
+  "seeds": [42, 0, 314],
+  "seed_results": {
+    "42": {
+      "val_loss": 4.61842299,
+      "val_bpb": 2.76711303,
+      "artifact_bytes": 2243058,
+      "step_avg_ms": 502.45
+    },
+    "0": {
+      "val_loss": 4.61715984,
+      "val_bpb": 2.76635623,
+      "artifact_bytes": 2241742,
+      "step_avg_ms": 511.60
+    },
+    "314": {
+      "val_loss": 4.61549568,
+      "val_bpb": 2.76535915,
+      "artifact_bytes": 2243871,
+      "step_avg_ms": 490.29
+    }
+  },
+  "bytes_total": 2243871,
+  "bytes_code": 63417,
+  "bytes_model_compressed_max": 2180454,
+  "num_layers": 4,
+  "model_dim": 256,
+  "num_heads": 4,
+  "num_kv_heads": 2,
+  "mlp_mult": 2,
+  "train_seq_len": 512,
+  "train_batch_tokens": 16384,
+  "iterations": 120,
+  "random_map_adapter": true,
+  "random_map_dim": 64,
+  "causal_conv_memory": true,
+  "conv_kernel": 5,
+  "conv_dilation": 2,
+  "attn_out_gate": true,
+  "qk_gain_init": 5.0,
+  "iha_lite": true,
+  "iha_start_layer": 0,
+  "delta_vs_local_attn_iha_base_bpb": -0.03708098,
+  "delta_vs_random_map_only_bpb": -0.01635720
+}
