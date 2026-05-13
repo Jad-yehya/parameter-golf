@@ -1,0 +1,13 @@
+{
+  "run_id": "wd_0_s42",
+  "seed": 42,
+  "val_var_bpb": 3.326439269246651,
+  "bits_per_token": 8.850472450256348,
+  "train_loss": 9.204779052734375,
+  "train_seconds": 3.7682351249968633,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2807831,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

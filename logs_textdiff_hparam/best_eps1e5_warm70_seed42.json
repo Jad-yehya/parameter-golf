@@ -1,0 +1,13 @@
+{
+  "run_id": "best_eps1e5_warm70_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.2750345623193478,
+  "bits_per_token": 8.71370279788971,
+  "train_loss": 46.647073078155515,
+  "train_seconds": 2.877845166003681,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2794063,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

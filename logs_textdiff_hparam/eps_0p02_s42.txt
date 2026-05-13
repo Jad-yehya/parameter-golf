@@ -1,0 +1,8 @@
+run_id:eps_0p02_s42
+device:cpu compute_dtype:torch.float32
+model_params:804480
+diffusion:self_condition:False mask_pattern:independent noise_eps:0.02 eval_steps:32
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+compressed_state_zlib_bytes:2806265
+final_var_bpb:3.29614760 bits_per_token:8.76987708 train_seconds:3.86

@@ -1,0 +1,13 @@
+{
+  "run_id": "bt1024_it160_s42",
+  "seed": 42,
+  "val_var_bpb": 3.322623345453294,
+  "bits_per_token": 8.840319633483887,
+  "train_loss": 8.055690121650695,
+  "train_seconds": 6.235027082992019,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2807262,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

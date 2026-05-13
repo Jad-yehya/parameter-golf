@@ -1,0 +1,13 @@
+{
+  "run_id": "eps_0p005_s42",
+  "seed": 42,
+  "val_var_bpb": 3.28604423367533,
+  "bits_per_token": 8.742995619773865,
+  "train_loss": 28.364555215835573,
+  "train_seconds": 3.603642417001538,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2804717,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

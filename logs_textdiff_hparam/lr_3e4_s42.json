@@ -1,0 +1,13 @@
+{
+  "run_id": "lr_3e4_s42",
+  "seed": 42,
+  "val_var_bpb": 3.33592464106086,
+  "bits_per_token": 8.875709652900696,
+  "train_loss": 9.251449704170227,
+  "train_seconds": 3.9136310839967337,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2791788,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

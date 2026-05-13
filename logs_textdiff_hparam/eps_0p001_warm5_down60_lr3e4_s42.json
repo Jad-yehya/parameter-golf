@@ -1,0 +1,13 @@
+{
+  "run_id": "eps_0p001_warm5_down60_lr3e4_s42",
+  "seed": 42,
+  "val_var_bpb": 3.3252415509153055,
+  "bits_per_token": 8.847285747528076,
+  "train_loss": 39.74840078353882,
+  "train_seconds": 2.880344666991732,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2792779,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

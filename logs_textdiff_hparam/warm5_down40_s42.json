@@ -1,0 +1,13 @@
+{
+  "run_id": "warm5_down40_s42",
+  "seed": 42,
+  "val_var_bpb": 3.3227789968629566,
+  "bits_per_token": 8.840733766555786,
+  "train_loss": 9.205262446403504,
+  "train_seconds": 4.692829624997103,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2805443,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

@@ -1,0 +1,13 @@
+{
+  "run_id": "eps_0p001_bt1024_it160_s42",
+  "seed": 42,
+  "val_var_bpb": 3.281093049255024,
+  "bits_per_token": 8.729822278022766,
+  "train_loss": 25.934545636177063,
+  "train_seconds": 4.51509575000091,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2808161,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}
