@@ -89,6 +89,39 @@ class TextDiffusionHarnessTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         loss.backward()
 
+    def test_zero_init_flags_control_head_and_residual_projection_init(self):
+        cfg_zero = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            zero_init_residual=True,
+            zero_init_head=True,
+        )
+        model_zero = td.DiffusionLM(cfg_zero)
+        self.assertAlmostEqual(float(model_zero.head.weight.detach().abs().sum()), 0.0)
+        self.assertAlmostEqual(float(model_zero.blocks[0].attn.proj.weight.detach().abs().sum()), 0.0)
+        self.assertAlmostEqual(float(model_zero.blocks[0].proj.weight.detach().abs().sum()), 0.0)
+
+        cfg_default = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            zero_init_residual=False,
+            zero_init_head=False,
+        )
+        model_default = td.DiffusionLM(cfg_default)
+        self.assertGreater(float(model_default.head.weight.detach().abs().sum()), 0.0)
+        self.assertGreater(float(model_default.blocks[0].attn.proj.weight.detach().abs().sum()), 0.0)
+        self.assertGreater(float(model_default.blocks[0].proj.weight.detach().abs().sum()), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

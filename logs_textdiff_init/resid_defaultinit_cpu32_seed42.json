@@ -1,0 +1,13 @@
+{
+  "run_id": "resid_defaultinit_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.326566604107405,
+  "bits_per_token": 8.850811243057251,
+  "train_loss": 9.204381585121155,
+  "train_seconds": 4.982675209001172,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2832576,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

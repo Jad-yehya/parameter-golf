@@ -32,6 +32,8 @@ class ModelConfig:
     mlp_mult: float = 2.0
     self_condition: bool = False
     rope_base: float = 10000.0
+    zero_init_residual: bool = True
+    zero_init_head: bool = True
 
     @property
     def total_vocab(self) -> int:
@@ -67,6 +69,8 @@ class Hyperparameters:
     num_heads = int(os.environ.get("NUM_HEADS", "4"))
     mlp_mult = float(os.environ.get("MLP_MULT", "2.0"))
     self_condition = bool(int(os.environ.get("SELF_CONDITION", "0")))
+    zero_init_residual = bool(int(os.environ.get("ZERO_INIT_RESIDUAL", "1")))
+    zero_init_head = bool(int(os.environ.get("ZERO_INIT_HEAD", "1")))
     mask_pattern = os.environ.get("MASK_PATTERN", "independent")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
@@ -261,7 +265,6 @@ class Attention(nn.Module):
         self.c_k = nn.Linear(dim, dim, bias=False)
         self.c_v = nn.Linear(dim, dim, bias=False)
         self.proj = nn.Linear(dim, dim, bias=False)
-        nn.init.zeros_(self.proj.weight)
         self.rotary = Rotary(self.head_dim, seq_len, rope_base)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -285,7 +288,9 @@ class Block(nn.Module):
         self.attn = Attention(cfg.model_dim, cfg.num_heads, cfg.seq_len, cfg.rope_base)
         self.fc = nn.Linear(cfg.model_dim, hidden, bias=False)
         self.proj = nn.Linear(hidden, cfg.model_dim, bias=False)
-        nn.init.zeros_(self.proj.weight)
+        if cfg.zero_init_residual:
+            nn.init.zeros_(self.attn.proj.weight)
+            nn.init.zeros_(self.proj.weight)
 
     def forward(self, x: Tensor, cond: Tensor) -> Tensor:
         x = x + self.attn(self.adaln_attn(x, cond))
@@ -302,7 +307,8 @@ class DiffusionLM(nn.Module):
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.num_layers)])
         self.final_norm = nn.LayerNorm(cfg.model_dim, elementwise_affine=False)
         self.head = nn.Linear(cfg.model_dim, cfg.padded_vocab, bias=False)
-        nn.init.zeros_(self.head.weight)
+        if cfg.zero_init_head:
+            nn.init.zeros_(self.head.weight)
         self.self_cond_proj = nn.Linear(cfg.total_vocab, cfg.model_dim, bias=False) if cfg.self_condition else None
         if self.self_cond_proj is not None:
             nn.init.zeros_(self.self_cond_proj.weight)
@@ -511,6 +517,8 @@ def main() -> None:
         num_heads=args.num_heads,
         mlp_mult=args.mlp_mult,
         self_condition=args.self_condition,
+        zero_init_residual=args.zero_init_residual,
+        zero_init_head=args.zero_init_head,
     )
     sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
     if int(sp.vocab_size()) != args.vocab_size:
@@ -539,7 +547,8 @@ def main() -> None:
     log(f"model_params:{n_params}")
     log(
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
-        f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
+        f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps} "
+        f"zero_init_residual:{args.zero_init_residual} zero_init_head:{args.zero_init_head}"
     )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "

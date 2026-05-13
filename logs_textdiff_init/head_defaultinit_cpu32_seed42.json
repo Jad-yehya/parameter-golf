@@ -1,0 +1,13 @@
+{
+  "run_id": "head_defaultinit_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.327177560532896,
+  "bits_per_token": 8.852436780929565,
+  "train_loss": 9.210463976860046,
+  "train_seconds": 5.015926290987409,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2943572,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}
