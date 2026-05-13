@@ -23,11 +23,13 @@
 #   SEEDS="42 0 314"     # default (matches PR #2135 author convention)
 #   DATA_PATH=...        # default ./data/datasets/fineweb10B_sp8192_caseops_marker_pair_v3
 #   TOKENIZER_PATH=...   # default ./tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model
+#   LOG_SUFFIX=tag       # writes train_seed42_tag.log etc.
 set -o pipefail
 
 SEEDS="${SEEDS:-42 0 314}"
 DATA_PATH="${DATA_PATH:-./data/datasets/fineweb10B_sp8192_caseops_marker_pair_v3}"
 TOKENIZER_PATH="${TOKENIZER_PATH:-./tokenizers/fineweb_8192_bpe_lossless_caps_caseops_v1_reserved.model}"
+LOG_SUFFIX="${LOG_SUFFIX:-}"
 
 if [ ! -d "$DATA_PATH" ]; then
   echo "ERROR: dataset dir not found: $DATA_PATH"
@@ -51,15 +53,23 @@ if [ ! -f "libonline_ngram_state.so" ] && [ -f "online_ngram_state.c" ]; then
 fi
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
+log_for_seed() {
+  if [ -n "$LOG_SUFFIX" ]; then
+    printf 'train_seed%s_%s.log' "$1" "$LOG_SUFFIX"
+  else
+    printf 'train_seed%s.log' "$1"
+  fi
+}
 echo "[$(ts)] === 3-seed run START ==="
 echo "  SEEDS:          $SEEDS"
 echo "  DATA_PATH:      $DATA_PATH"
 echo "  TOKENIZER_PATH: $TOKENIZER_PATH"
+echo "  LOG_SUFFIX:     ${LOG_SUFFIX:-<none>}"
 
 FAILED_SEEDS=()
 
 for SEED in $SEEDS; do
-  LOG="train_seed${SEED}.log"
+  LOG="$(log_for_seed "$SEED")"
   echo ""
   echo "[$(ts)] >>> seed=$SEED -> $LOG >>>"
   env SEED="$SEED" \
@@ -98,8 +108,14 @@ for SEED in $SEEDS; do
     WARMDOWN_FRAC=0.85 \
     BETA2=0.99 \
     FUSED_CE_ENABLED=1 \
-    SPARSE_ATTN_GATE_ENABLED=1 \
-    SPARSE_ATTN_GATE_SCALE=0.5 \
+    QK_GAIN_INIT="${QK_GAIN_INIT:-5.0}" \
+    IHA_LITE="${IHA_LITE:-0}" \
+    IHA_START_LAYER="${IHA_START_LAYER:--1}" \
+    IHA_MIX_V="${IHA_MIX_V:-1}" \
+    ATTN_OUT_GATE_ENABLED="${ATTN_OUT_GATE_ENABLED:-0}" \
+    ATTN_OUT_GATE_SRC="${ATTN_OUT_GATE_SRC:-proj}" \
+    SPARSE_ATTN_GATE_ENABLED="${SPARSE_ATTN_GATE_ENABLED:-1}" \
+    SPARSE_ATTN_GATE_SCALE="${SPARSE_ATTN_GATE_SCALE:-0.5}" \
     SMEAR_GATE_ENABLED=1 \
     GATE_WINDOW=12 \
     LQER_ENABLED=1 \
@@ -139,7 +155,7 @@ echo "=== Summary ==="
 printf "%-8s %-16s %-14s %-12s %s\n" "seed" "ttt_phased_bpb" "val_loss" "artifact_B" "eval_s"
 echo "------------------------------------------------------------------------"
 for SEED in $SEEDS; do
-  LOG="train_seed${SEED}.log"
+  LOG="$(log_for_seed "$SEED")"
   sw=$(grep -E "quantized_ttt_phased" "$LOG" 2>/dev/null | grep -oP "val_bpb:\K[0-9.]+" | tail -1)
   vl=$(grep -E "quantized_ttt_phased" "$LOG" 2>/dev/null | grep -oP "val_loss:\K[0-9.]+" | tail -1)
   sz=$(grep "Total submission size quantized+pergroup" "$LOG" 2>/dev/null | grep -oE "[0-9]+" | tail -1)
@@ -156,4 +172,4 @@ if [ "${#FAILED_SEEDS[@]}" -ne 0 ]; then
   exit 1
 fi
 
-python3 summarize_validation.py $(for SEED in $SEEDS; do printf 'train_seed%s.log ' "$SEED"; done)
+python3 summarize_validation.py $(for SEED in $SEEDS; do printf '%s ' "$(log_for_seed "$SEED")"; done)

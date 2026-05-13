@@ -268,6 +268,9 @@ class Hyperparameters:
         [float(x) for x in _qk_sched_raw.split(",") if x.strip()]
         if _qk_sched_raw.strip() else []
     )
+    iha_lite = bool(int(os.environ.get("IHA_LITE", "0")))
+    iha_start_layer = int(os.environ.get("IHA_START_LAYER", "-1"))
+    iha_mix_v = bool(int(os.environ.get("IHA_MIX_V", "1")))
     num_loops = int(os.environ.get("NUM_LOOPS", 2))
     loop_start = int(os.environ.get("LOOP_START", 3))
     loop_end = int(os.environ.get("LOOP_END", 5))
@@ -1096,6 +1099,7 @@ class CausalSelfAttention(nn.Module):
     def __init__(
         self, dim, num_heads, num_kv_heads, rope_base, qk_gain_init, train_seq_len, yarn=True,
         attn_out_gate=False, attn_out_gate_src="proj", gate_window=12,
+        use_iha=False, iha_mix_v=True,
         gated_attn=False, gated_attn_init_std=0.01,
         sparse_attn_gate=False, sparse_attn_gate_init_std=0.0, sparse_attn_gate_scale=1.0,
         gated_xsa_residual=False, gated_xsa_residual_span=1.0,
@@ -1111,6 +1115,8 @@ class CausalSelfAttention(nn.Module):
             )
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
+        self.use_iha = use_iha
+        self.iha_mix_v = iha_mix_v
         self.head_dim = dim // num_heads
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for RoPE")
@@ -1120,6 +1126,11 @@ class CausalSelfAttention(nn.Module):
         self.rope_dims = 0
         self.rotary = Rotary(self.head_dim, base=rope_base, train_seq_len=train_seq_len, yarn=yarn)
         self.use_xsa = False
+        if use_iha:
+            self.q_head_mix = nn.Parameter(torch.eye(num_heads, dtype=torch.float32))
+            self.k_head_mix = nn.Parameter(torch.eye(num_kv_heads, dtype=torch.float32))
+            if iha_mix_v:
+                self.v_head_mix = nn.Parameter(torch.eye(num_kv_heads, dtype=torch.float32))
         # AttnOutGate (PR #1667 MarioPaerle): per-head multiplicative gate on attention
         # output. CastedLinear so restore_fp32_params casts back to fp32 for GPTQ.
         # _zero_init -> 2*sigmoid(0)=1 -> transparent at init.
@@ -1174,6 +1185,10 @@ class CausalSelfAttention(nn.Module):
         proj = coef * vn
         return (y_g - proj).reshape(B, T, H, D)
 
+    @staticmethod
+    def _mix_heads(x, mix):
+        return torch.einsum("ij,btjd->btid", mix.to(dtype=x.dtype), x)
+
     def forward(self, x, q_w, k_w, v_w, out_w, cu_seqlens=None, max_seqlen=0):
         bsz, seqlen, dim = x.shape
         # q_raw kept around as a tap point for attn_out_gate_src='q' (post-projection,
@@ -1182,6 +1197,11 @@ class CausalSelfAttention(nn.Module):
         q = q_raw.reshape(bsz, seqlen, self.num_heads, self.head_dim)
         k = F.linear(x, k_w.to(x.dtype)).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim)
         v = F.linear(x, v_w.to(x.dtype)).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim)
+        if self.use_iha:
+            q = self._mix_heads(q, self.q_head_mix)
+            k = self._mix_heads(k, self.k_head_mix)
+            if self.iha_mix_v:
+                v = self._mix_heads(v, self.v_head_mix)
         q = F.rms_norm(q, (q.size(-1),))
         k = F.rms_norm(k, (k.size(-1),))
         cos, sin = self.rotary(seqlen, x.device, q.dtype)
@@ -1263,6 +1283,8 @@ class Block(nn.Module):
         attn_out_gate=False,
         attn_out_gate_src="proj",
         gate_window=12,
+        use_iha=False,
+        iha_mix_v=True,
         gated_attn=False,
         gated_attn_init_std=0.01,
         sparse_attn_gate=False,
@@ -1277,6 +1299,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(
             dim, num_heads, num_kv_heads, rope_base, qk_gain_init, train_seq_len, yarn=yarn,
             attn_out_gate=attn_out_gate, attn_out_gate_src=attn_out_gate_src, gate_window=gate_window,
+            use_iha=use_iha,
+            iha_mix_v=iha_mix_v,
             gated_attn=gated_attn, gated_attn_init_std=gated_attn_init_std,
             sparse_attn_gate=sparse_attn_gate,
             sparse_attn_gate_init_std=sparse_attn_gate_init_std,
@@ -1331,6 +1355,9 @@ class GPT(nn.Module):
         self.mlp_down_bank = nn.Parameter(torch.empty(h.num_layers, h.model_dim, hidden_dim))
         self.num_encoder_layers = h.num_layers // 2
         self.num_decoder_layers = h.num_layers - self.num_encoder_layers
+        iha_start_layer = h.iha_start_layer
+        if iha_start_layer < 0:
+            iha_start_layer = h.num_layers // 2
         self.blocks = nn.ModuleList(
             [
                 Block(
@@ -1351,6 +1378,8 @@ class GPT(nn.Module):
                     attn_out_gate=h.attn_out_gate_enabled,
                     attn_out_gate_src=h.attn_out_gate_src,
                     gate_window=h.gate_window,
+                    use_iha=h.iha_lite and i >= iha_start_layer,
+                    iha_mix_v=h.iha_mix_v,
                     gated_attn=h.gated_attn_enabled,
                     gated_attn_init_std=h.gated_attn_init_std,
                     sparse_attn_gate=h.sparse_attn_gate_enabled,
@@ -1749,6 +1778,11 @@ class GPT(nn.Module):
         v = (F.linear(n, v_w.to(n.dtype)) + lora.v_loras[slot](n)).reshape(
             bsz, seqlen, attn.num_kv_heads, attn.head_dim
         )
+        if attn.use_iha:
+            q = attn._mix_heads(q, attn.q_head_mix)
+            k = attn._mix_heads(k, attn.k_head_mix)
+            if attn.iha_mix_v:
+                v = attn._mix_heads(v, attn.v_head_mix)
         q = F.rms_norm(q, (q.size(-1),))
         k = F.rms_norm(k, (k.size(-1),))
         cos, sin = attn.rotary(seqlen, n.device, q.dtype)
@@ -1811,6 +1845,11 @@ class GPT(nn.Module):
         v = (F.linear(n, v_w.to(n.dtype)) + lora.v_loras[slot](n)).reshape(
             bsz, seqlen, attn.num_kv_heads, attn.head_dim
         )
+        if attn.use_iha:
+            q = attn._mix_heads(q, attn.q_head_mix)
+            k = attn._mix_heads(k, attn.k_head_mix)
+            if attn.iha_mix_v:
+                v = attn._mix_heads(v, attn.v_head_mix)
         q = F.rms_norm(q, (q.size(-1),))
         k = F.rms_norm(k, (k.size(-1),))
         cos, sin = attn.rotary(seqlen, n.device, q.dtype)
@@ -2141,7 +2180,7 @@ CONTROL_TENSOR_NAME_PATTERNS = tuple(
     pattern
     for pattern in os.environ.get(
         "CONTROL_TENSOR_NAME_PATTERNS",
-        "attn_scale,attn_scales,mlp_scale,mlp_scales,resid_mix,resid_mixes,q_gain,skip_weight,skip_weights,skip_gates,parallel_post_lambdas,parallel_resid_lambdas,attn_gate_proj,attn_gate_w,smear_gate,smear_lambda",
+        "attn_scale,attn_scales,mlp_scale,mlp_scales,resid_mix,resid_mixes,q_gain,head_mix,skip_weight,skip_weights,skip_gates,parallel_post_lambdas,parallel_resid_lambdas,attn_gate_proj,attn_gate_w,smear_gate,smear_lambda",
     ).split(",")
     if pattern
 )

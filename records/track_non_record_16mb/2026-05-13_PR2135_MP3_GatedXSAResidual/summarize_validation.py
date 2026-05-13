@@ -15,7 +15,7 @@ TRAIN_BUDGET_MS = 600_000
 EVAL_BUDGET_SECONDS = 600.0
 
 
-SEED_RE = re.compile(r"train_seed(\d+)\.log$")
+SEED_RE = re.compile(r"train_seed(\d+)(?:_[^.]+)?\.log$")
 TTT_RE = re.compile(
     r"quantized_ttt_phased\s+val_loss:(?P<loss>[0-9.]+)\s+"
     r"val_bpb:(?P<bpb>[0-9.]+)\s+eval_time:(?P<eval_ms>[0-9.]+)ms"
