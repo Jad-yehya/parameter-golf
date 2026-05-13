@@ -1,0 +1,23 @@
+{
+  "author": "Jad Yehya",
+  "github_id": "Jad-yehya",
+  "name": "PR #2135 + MP3 marker-pair fusion + adaptive n-gram + gated XSA residual candidate",
+  "date": "2026-05-13",
+  "track": "non_record_16mb",
+  "status": "candidate_pending_validation",
+  "val_loss": null,
+  "val_bpb": null,
+  "seeds": [42, 0, 314],
+  "comparison_baseline_prs": [2135, 2158],
+  "implementation_lineage_prs": [2135, 2158, 2129, 2054],
+  "technique_summary": "PR #2158 MP3 marker-pair fusion on the PR #2135 frontier stack, plus adaptive token-only n-gram boost scaling and a zero-init per-head gated residual scale on the XSA self-value projection subtraction. ADAPTIVE_NGRAM_GAMMA=1.0 keeps the same prefix-only hint and closed-form normalization while reducing boost when the model already agrees. GATED_XSA_RESIDUAL=1 keeps step-0 behavior identical to the MP3/#2135 XSA path because the scale is 1 + tanh(0).",
+  "validation_required_before_pr": {
+    "seed_count": 3,
+    "required_seeds": [42, 0, 314],
+    "train_budget_seconds": 600,
+    "eval_budget_seconds": 600,
+    "artifact_byte_cap": 16000000,
+    "ngram_precompute_inside_eval_timer": true
+  },
+  "note": "This metadata intentionally contains no result claim. Populate val_loss, val_bpb, seed_results, artifact_bytes_max, and environment only after fresh candidate logs are produced."
+}
