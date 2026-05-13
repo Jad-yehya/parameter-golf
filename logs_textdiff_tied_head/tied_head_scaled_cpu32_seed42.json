@@ -1,0 +1,14 @@
+{
+  "run_id": "tied_head_scaled_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.542567882653354,
+  "bits_per_token": 9.425513863563538,
+  "train_loss": 8.367008686065674,
+  "train_seconds": 4.494831167001394,
+  "model_params": 665216,
+  "compressed_state_zlib_bytes": 2438944,
+  "self_condition": false,
+  "tie_output_head": true,
+  "mask_pattern": "independent",
+  "eval_steps": 32
+}

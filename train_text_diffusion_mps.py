@@ -31,6 +31,7 @@ class ModelConfig:
     num_heads: int = 4
     mlp_mult: float = 2.0
     self_condition: bool = False
+    tie_output_head: bool = False
     rope_base: float = 10000.0
 
     @property
@@ -67,6 +68,7 @@ class Hyperparameters:
     num_heads = int(os.environ.get("NUM_HEADS", "4"))
     mlp_mult = float(os.environ.get("MLP_MULT", "2.0"))
     self_condition = bool(int(os.environ.get("SELF_CONDITION", "0")))
+    tie_output_head = bool(int(os.environ.get("TIE_OUTPUT_HEAD", "0")))
     mask_pattern = os.environ.get("MASK_PATTERN", "independent")
     span_len = int(os.environ.get("SPAN_LEN", "4"))
     noise_eps = float(os.environ.get("NOISE_EPS", "0.1"))
@@ -301,8 +303,10 @@ class DiffusionLM(nn.Module):
         self.sigma_map = TimestepEmbedder(cfg.model_dim)
         self.blocks = nn.ModuleList([Block(cfg) for _ in range(cfg.num_layers)])
         self.final_norm = nn.LayerNorm(cfg.model_dim, elementwise_affine=False)
-        self.head = nn.Linear(cfg.model_dim, cfg.padded_vocab, bias=False)
-        nn.init.zeros_(self.head.weight)
+        self.head = None if cfg.tie_output_head else nn.Linear(cfg.model_dim, cfg.padded_vocab, bias=False)
+        self.output_head_scale = cfg.model_dim**-0.5 if cfg.tie_output_head else 1.0
+        if self.head is not None:
+            nn.init.zeros_(self.head.weight)
         self.self_cond_proj = nn.Linear(cfg.total_vocab, cfg.model_dim, bias=False) if cfg.self_condition else None
         if self.self_cond_proj is not None:
             nn.init.zeros_(self.self_cond_proj.weight)
@@ -315,7 +319,13 @@ class DiffusionLM(nn.Module):
         cond = F.silu(self.sigma_map(sigma)).to(dtype=x.dtype)
         for block in self.blocks:
             x = block(x, cond)
-        logits = self.head(self.final_norm(x))[..., : self.cfg.total_vocab].float()
+        h = self.final_norm(x)
+        if self.cfg.tie_output_head:
+            real_logits = F.linear(h, self.tok_emb.weight[: self.cfg.vocab_size]) * self.output_head_scale
+            mask_logits = real_logits.new_zeros(*real_logits.shape[:-1], self.cfg.total_vocab - self.cfg.vocab_size)
+            logits = torch.cat((real_logits, mask_logits), dim=-1).float()
+        else:
+            logits = self.head(h)[..., : self.cfg.total_vocab].float()
         return logits
 
     def subs_log_probs(self, xt: Tensor, sigma: Tensor, self_condition_logits: Tensor | None = None) -> Tensor:
@@ -511,6 +521,7 @@ def main() -> None:
         num_heads=args.num_heads,
         mlp_mult=args.mlp_mult,
         self_condition=args.self_condition,
+        tie_output_head=args.tie_output_head,
     )
     sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
     if int(sp.vocab_size()) != args.vocab_size:
@@ -539,7 +550,7 @@ def main() -> None:
     log(f"model_params:{n_params}")
     log(
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
-        f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
+        f"tie_output_head:{args.tie_output_head} noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
     )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "
@@ -614,6 +625,7 @@ def main() -> None:
         "model_params": n_params,
         "compressed_state_zlib_bytes": bytes_zlib,
         "self_condition": args.self_condition,
+        "tie_output_head": args.tie_output_head,
         "mask_pattern": args.mask_pattern,
         "eval_steps": args.eval_steps,
     }

@@ -1,0 +1,14 @@
+run_id:tied_head_scaled_cpu32_seed42
+device:cpu compute_dtype:torch.float32
+model_params:665216
+diffusion:self_condition:False mask_pattern:independent tie_output_head:True noise_eps:0.1 eval_steps:32
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:7.2553 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:7.9718 lr:2.400e-04 elapsed:0.1s
+step:3/80 train_loss:7.5087 lr:3.600e-04 elapsed:0.2s
+step:4/80 train_loss:7.8009 lr:4.800e-04 elapsed:0.3s
+step:5/80 train_loss:8.8364 lr:6.000e-04 elapsed:0.3s
+step:50/80 train_loss:9.5505 lr:6.000e-04 elapsed:3.1s
+compressed_state_zlib_bytes:2438944
+final_var_bpb:3.54256788 bits_per_token:9.42551386 train_seconds:4.49

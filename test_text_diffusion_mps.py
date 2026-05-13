@@ -89,6 +89,61 @@ class TextDiffusionHarnessTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         loss.backward()
 
+    def test_tied_output_head_reuses_token_embedding_parameters(self):
+        untied_cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+            tie_output_head=False,
+        )
+        tied_cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+            tie_output_head=True,
+        )
+        untied = td.DiffusionLM(untied_cfg)
+        tied = td.DiffusionLM(tied_cfg)
+        untied_params = sum(p.numel() for p in untied.parameters())
+        tied_params = sum(p.numel() for p in tied.parameters())
+        self.assertEqual(untied_params - tied_params, untied_cfg.padded_vocab * untied_cfg.model_dim)
+        self.assertAlmostEqual(tied.output_head_scale, tied_cfg.model_dim**-0.5)
+        self.assertIs(tied.head, None)
+        self.assertIsNot(tied.tok_emb.weight, None)
+        self.assertNotIn("head.weight", dict(tied.named_parameters()))
+
+    def test_tied_output_head_forward_shape_and_excludes_mask_logit(self):
+        cfg = td.ModelConfig(
+            vocab_size=16,
+            mask_id=16,
+            padded_vocab=24,
+            seq_len=8,
+            num_layers=1,
+            model_dim=32,
+            num_heads=4,
+            mlp_mult=2.0,
+            tie_output_head=True,
+        )
+        model = td.DiffusionLM(cfg)
+        xt = torch.full((2, cfg.seq_len), cfg.mask_id)
+        sigma = torch.full((2,), 0.4)
+        logits = model.forward_logits(xt, sigma)
+        self.assertEqual(logits.shape, (2, cfg.seq_len, cfg.total_vocab))
+        log_probs = model.subs_log_probs(xt, sigma)
+        self.assertTrue(torch.all(log_probs[..., cfg.mask_id] < -1e5))
+        real_logsum = torch.logsumexp(log_probs[..., : cfg.vocab_size], dim=-1)
+        self.assertTrue(torch.allclose(real_logsum, torch.zeros_like(real_logsum), atol=1e-6))
+
 
 if __name__ == "__main__":
     unittest.main()
