@@ -12,22 +12,22 @@ This is a validation candidate, not a completed submission. Do not open a PR wit
 
 ## Optional Local Lead
 
-Local MPS screening on a compact SP1024 harness found an additional lead: `ATTN_OUT_GATE_ENABLED=1`, `QK_GAIN_INIT=5.25`, and `IHA_LITE=1` improved all three local seeds versus the same attention-gate/QK setup without IHA. Exact local int8+zlib BPB for seeds `42/0/314` was `2.80768378/2.80495682/2.80443943` (mean `2.80569334`), versus `2.80973965/2.80653757/2.80589733` (mean `2.80739152`) without IHA. This is not official validation evidence, but it is strong enough to expose a separate 8xH100 validation path.
+Local MPS screening on a compact SP1024 harness found an additional lead: `ATTN_OUT_GATE_ENABLED=1`, `QK_GAIN_INIT=5.0`, and all-layer `IHA_LITE=1` improved all three local seeds versus the same attention-gate/QK setup without IHA. Exact local int8+zlib BPB for seeds `42/0/314` was `2.80552135/2.80257583/2.80197416` (mean `2.80335711`), versus `2.80973965/2.80653757/2.80589733` (mean `2.80739152`) without IHA. This is not official validation evidence, but it is strong enough to expose a separate 8xH100 validation path.
 
 Run it with:
 
 ```bash
-bash run_3seed_attngate_qk525_iha.sh
+bash run_3seed_attngate_qk50_iha_all.sh
 ```
 
-This wrapper disables `SPARSE_ATTN_GATE_ENABLED`, enables `ATTN_OUT_GATE_ENABLED`, sets `QK_GAIN_INIT=5.25`, enables `IHA_LITE=1`, and writes tagged logs (`train_seed*_attngate_qk525_iha.log`) so it does not overwrite the default candidate logs.
+This wrapper disables `SPARSE_ATTN_GATE_ENABLED`, enables `ATTN_OUT_GATE_ENABLED`, sets `QK_GAIN_INIT=5.0`, enables all-layer `IHA_LITE=1`, and writes tagged logs (`train_seed*_attngate_qk50_iha_all.log`) so it does not overwrite the default candidate logs.
 
 ## Delta vs PR #2158
 
 - `train_gpt.py`: adds `ADAPTIVE_NGRAM_GAMMA`, `GATED_XSA_RESIDUAL`, `GATED_XSA_RESIDUAL_SPAN`, and optional `IHA_LITE` head mixing.
 - `online_ngram_tilt.py`: optionally scales the per-position boost by model disagreement while defaulting to the original fixed-boost formula.
 - `run_3seed.sh`: enables `ADAPTIVE_NGRAM_GAMMA=1.0` and `GATED_XSA_RESIDUAL=1` with span 1.0, while allowing tagged validation variants.
-- `run_3seed_attngate_qk525_iha.sh`: optional MPS-derived validation variant.
+- `run_3seed_attngate_qk50_iha_all.sh`: optional MPS-derived validation variant.
 - No tokenizer-rule change, no eval-time cache, no target-conditioned gating, and no change to score-first TTT ordering.
 
 ## MP3 Base
