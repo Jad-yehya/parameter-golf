@@ -31,15 +31,17 @@ It is local CPU screening only. No Jean Zay, no remote cluster, and no upstream 
 | loglinear schedule | 3.28550308 | 3.22182472 | 3.22851567 | 3.24528116 |
 | cosine schedule | 3.25314824 | - | - | - |
 | power schedule, `NOISE_POWER=2.0` | 3.24413077 | 3.24602009 | 3.24620334 | 3.24545140 |
+| loglinear schedule, `NOISE_EPS=0.00001`, `WARMDOWN_STEPS=60` | 3.27515881 | 3.22082567 | 3.21929975 | 3.23842808 |
+| power schedule, `NOISE_EPS=0.00001`, `WARMDOWN_STEPS=60` | 3.23460642 | 3.24204677 | 3.24046431 | 3.23903917 |
 
-Power schedule is much better than loglinear on seed 42, but the 3-seed mean is effectively tied and slightly worse than the current loglinear simple-loss branch.
+Power schedule is much better than loglinear on seed 42, but the 3-seed mean is effectively tied and slightly worse than the current loglinear simple-loss branch. This remains true after applying the lower-epsilon/longer-warmdown setting.
 
 ## Conclusion
 
 Do not replace the current lead with this branch. The best local text-diffusion setting remains:
 
 ```bash
-LOSS_WEIGHTING=simple_mask_mean NOISE_EPS=0.01 NOISE_SCHEDULE=loglinear
+LOSS_WEIGHTING=simple_mask_mean NOISE_EPS=0.00001 WARMDOWN_STEPS=60 NOISE_SCHEDULE=loglinear
 ```
 
 The power schedule may still be useful if we care about variance or if it combines better with a larger model, but this small screen does not justify making it the default.

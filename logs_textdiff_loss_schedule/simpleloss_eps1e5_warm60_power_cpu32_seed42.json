@@ -1,0 +1,16 @@
+{
+  "run_id": "simpleloss_eps1e5_warm60_power_cpu32_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.2346064160998576,
+  "bits_per_token": 8.606137871742249,
+  "train_loss": 6.022957587242127,
+  "train_seconds": 2.899199874998885,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2796016,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32,
+  "loss_weighting": "simple_mask_mean",
+  "noise_schedule": "power",
+  "noise_power": 2.0
+}
