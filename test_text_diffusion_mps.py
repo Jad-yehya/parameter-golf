@@ -68,6 +68,29 @@ class TextDiffusionHarnessTests(unittest.TestCase):
                 gaps = idx[1:] - idx[:-1]
                 self.assertLessEqual(int(gaps.max()), 3)
 
+    def test_eval_grid_masks_are_reproducible_without_touching_rng(self):
+        x0 = torch.arange(16).reshape(2, 8)
+        t = torch.tensor([0.25, 0.75])
+        before = torch.random.get_rng_state()
+        mask_a = td.make_eval_mask(x0, t, eps=0.1, mode="grid", step_idx=2, n_steps=8)
+        after = torch.random.get_rng_state()
+        torch.manual_seed(999)
+        mask_b = td.make_eval_mask(x0, t, eps=0.1, mode="grid", step_idx=2, n_steps=8)
+        self.assertTrue(torch.equal(mask_a, mask_b))
+        self.assertTrue(torch.equal(before, after))
+
+    def test_eval_antithetic_masks_pair_grid_with_reversed_grid(self):
+        x0 = torch.arange(16).reshape(2, 8)
+        t = torch.tensor([0.25, 0.75])
+        grid = td.make_eval_mask(x0, t, eps=0.1, mode="grid", step_idx=1, n_steps=8)
+        masks = td.make_eval_mask(x0, t, eps=0.1, mode="antithetic", step_idx=1, n_steps=8)
+        self.assertEqual(masks.shape, (2, 2, 8))
+        torch.manual_seed(123)
+        masks_again = td.make_eval_mask(x0, t, eps=0.1, mode="antithetic", step_idx=1, n_steps=8)
+        self.assertTrue(torch.equal(masks, masks_again))
+        self.assertTrue(torch.equal(masks[:, 0], grid))
+        self.assertFalse(torch.equal(masks[:, 0], masks[:, 1]))
+
     def test_tiny_model_forward_and_mdlm_loss_are_finite(self):
         cfg = td.ModelConfig(
             vocab_size=16,

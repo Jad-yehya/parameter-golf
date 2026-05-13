@@ -1,0 +1,14 @@
+{
+  "run_id": "plain_random_8_seed314",
+  "seed": 314,
+  "val_var_bpb": 3.29973322405774,
+  "bits_per_token": 8.779417157173157,
+  "train_loss": 9.502342772483825,
+  "train_seconds": 3.7309590830118395,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2802650,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 8,
+  "eval_mask_mode": "random"
+}

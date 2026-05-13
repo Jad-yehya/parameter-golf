@@ -1,0 +1,14 @@
+{
+  "run_id": "plain_grid_32_seed0",
+  "seed": 0,
+  "val_var_bpb": 3.2684362687677786,
+  "bits_per_token": 8.696147084236145,
+  "train_loss": 7.706863760948181,
+  "train_seconds": 3.7975084579957183,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2796625,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 32,
+  "eval_mask_mode": "grid"
+}

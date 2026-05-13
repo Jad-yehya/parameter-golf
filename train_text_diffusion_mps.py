@@ -54,6 +54,7 @@ class Hyperparameters:
     max_val_tokens = int(os.environ.get("MAX_VAL_TOKENS", "1048576"))
     val_seqs = int(os.environ.get("VAL_SEQS", "64"))
     eval_steps = int(os.environ.get("DIFFUSION_EVAL_STEPS", "32"))
+    eval_mask_mode = os.environ.get("EVAL_MASK_MODE", "random")
     warmup_steps = int(os.environ.get("WARMUP_STEPS", "20"))
     warmdown_steps = int(os.environ.get("WARMDOWN_STEPS", "100"))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", "0"))
@@ -155,6 +156,38 @@ def make_corrupted_batch(
         raise ValueError(f"Unsupported MASK_PATTERN={pattern!r}")
     xt = torch.where(mask, torch.full_like(x0, mask_id), x0)
     return xt, mask
+
+
+def _eval_mask_grid_values(x0: Tensor, step_idx: int, n_steps: int) -> Tensor:
+    bsz, seq_len = x0.shape
+    positions = (torch.arange(seq_len, device=x0.device, dtype=torch.float32) + 0.5) / seq_len
+    row_offsets = torch.arange(bsz, device=x0.device, dtype=torch.float32) * 0.754877666
+    step_offset = float(step_idx + 1) / max(n_steps, 1) * 0.618033989
+    return torch.remainder(positions[None, :] + row_offsets[:, None] + step_offset, 1.0)
+
+
+def make_eval_mask(
+    x0: Tensor,
+    t: Tensor,
+    eps: float,
+    mode: str,
+    step_idx: int,
+    n_steps: int,
+) -> Tensor:
+    normalized = mode.lower()
+    _, alpha = log_linear_noise(t, eps=eps)
+    move_chance = (1.0 - alpha).clamp(0.0, 1.0)
+    if normalized == "random":
+        return torch.rand_like(x0.float()) < move_chance[:, None]
+    if normalized == "grid":
+        u = _eval_mask_grid_values(x0, step_idx=step_idx, n_steps=n_steps)
+        return u < move_chance[:, None]
+    if normalized == "antithetic":
+        u = _eval_mask_grid_values(x0, step_idx=step_idx, n_steps=n_steps)
+        first = u < move_chance[:, None]
+        second = (1.0 - u) < move_chance[:, None]
+        return torch.stack((first, second), dim=1)
+    raise ValueError(f"Unsupported EVAL_MASK_MODE={mode!r}")
 
 
 def build_sentencepiece_luts(
@@ -362,6 +395,7 @@ def variational_elbo_bits(
     mask_pattern: str,
     span_len: int,
     compute_dtype: torch.dtype,
+    eval_mask_mode: str = "random",
 ) -> Tensor:
     bsz, seq_len = x0.shape
     total_bits = torch.zeros(bsz, device=x0.device)
@@ -373,18 +407,37 @@ def variational_elbo_bits(
         alpha_curr = float(alpha_grid[step])
         t = torch.full((bsz,), float(t_grid[step]), device=x0.device)
         sigma = sigma_grid[step].expand(bsz)
-        xt, mask = make_corrupted_batch(
-            x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
-        )
+        if eval_mask_mode.lower() == "random":
+            xt, mask = make_corrupted_batch(
+                x0, t, mask_id=model.cfg.mask_id, eps=eps, pattern=mask_pattern, span_len=span_len
+            )
+            mask_repeats = 1
+            x0_eval = x0
+            sigma_eval = sigma
+        else:
+            eval_mask = make_eval_mask(x0, t, eps=eps, mode=eval_mask_mode, step_idx=step, n_steps=n_steps)
+            if eval_mask.ndim == 3:
+                mask_repeats = eval_mask.shape[1]
+                mask = eval_mask.flatten(0, 1)
+                x0_eval = x0[:, None, :].expand(-1, mask_repeats, -1).flatten(0, 1)
+                sigma_eval = sigma[:, None].expand(-1, mask_repeats).flatten(0, 1)
+            else:
+                mask_repeats = 1
+                mask = eval_mask
+                x0_eval = x0
+                sigma_eval = sigma
+            xt = torch.where(mask, torch.full_like(x0_eval, model.cfg.mask_id), x0_eval)
         self_condition_logits = None
         if model.cfg.self_condition:
             with autocast_context(x0.device, compute_dtype):
-                self_condition_logits = model.forward_logits(xt, sigma)
+                self_condition_logits = model.forward_logits(xt, sigma_eval)
         with autocast_context(x0.device, compute_dtype):
-            log_probs = model.subs_log_probs(xt, sigma, self_condition_logits=self_condition_logits)
-        log_p_x0 = torch.gather(log_probs.float(), -1, x0[..., None]).squeeze(-1)
+            log_probs = model.subs_log_probs(xt, sigma_eval, self_condition_logits=self_condition_logits)
+        log_p_x0 = torch.gather(log_probs.float(), -1, x0_eval[..., None]).squeeze(-1)
         reveal_prob = (alpha_prev - alpha_curr) / max(1.0 - alpha_curr, 1e-12)
         step_bits = reveal_prob * (-log_p_x0) * mask.float() / math.log(2.0)
+        if mask_repeats > 1:
+            step_bits = step_bits.reshape(bsz, mask_repeats, seq_len).mean(dim=1)
         total_bits += step_bits.sum(dim=-1)
         alpha_prev = alpha_curr
     return total_bits
@@ -472,6 +525,7 @@ def evaluate_bpb(
             mask_pattern=args.mask_pattern,
             span_len=args.span_len,
             compute_dtype=compute_dtype,
+            eval_mask_mode=args.eval_mask_mode,
         )
         bytes_ = count_sequence_bytes(x0, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut)
         total_bits += float(bits.sum().item())
@@ -539,7 +593,7 @@ def main() -> None:
     log(f"model_params:{n_params}")
     log(
         f"diffusion:self_condition:{args.self_condition} mask_pattern:{args.mask_pattern} "
-        f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps}"
+        f"noise_eps:{args.noise_eps} eval_steps:{args.eval_steps} eval_mask_mode:{args.eval_mask_mode}"
     )
     log(
         f"shape:layers:{args.num_layers} dim:{args.model_dim} heads:{args.num_heads} "
@@ -616,6 +670,7 @@ def main() -> None:
         "self_condition": args.self_condition,
         "mask_pattern": args.mask_pattern,
         "eval_steps": args.eval_steps,
+        "eval_mask_mode": args.eval_mask_mode,
     }
     log(f"compressed_state_zlib_bytes:{bytes_zlib}")
     log(f"final_var_bpb:{bpb:.8f} bits_per_token:{bits_per_token:.8f} train_seconds:{train_time:.2f}")

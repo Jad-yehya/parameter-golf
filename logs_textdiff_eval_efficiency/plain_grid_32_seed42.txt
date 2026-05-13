@@ -1,0 +1,14 @@
+run_id:plain_grid_32_seed42
+device:cpu compute_dtype:torch.float32
+model_params:804480
+diffusion:self_condition:False mask_pattern:independent noise_eps:0.1 eval_steps:32 eval_mask_mode:grid
+shape:layers:2 dim:128 heads:4 seq_len:256 batch_seqs:8
+data:train_tokens:262144 val_tokens:262144
+step:1/80 train_loss:5.9102 lr:1.200e-04 elapsed:0.1s
+step:2/80 train_loss:8.2358 lr:2.400e-04 elapsed:0.1s
+step:3/80 train_loss:9.4535 lr:3.600e-04 elapsed:0.2s
+step:4/80 train_loss:9.5826 lr:4.800e-04 elapsed:0.3s
+step:5/80 train_loss:9.3528 lr:6.000e-04 elapsed:0.3s
+step:80/80 train_loss:8.7830 lr:6.332e-05 elapsed:5.1s
+compressed_state_zlib_bytes:2807358
+final_var_bpb:3.28476609 bits_per_token:8.73959494 train_seconds:5.09

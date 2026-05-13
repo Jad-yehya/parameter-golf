@@ -1,0 +1,14 @@
+{
+  "run_id": "plain_antithetic_8_seed42",
+  "seed": 42,
+  "val_var_bpb": 3.297729156152505,
+  "bits_per_token": 8.77408504486084,
+  "train_loss": 9.20482861995697,
+  "train_seconds": 3.7033712919946993,
+  "model_params": 804480,
+  "compressed_state_zlib_bytes": 2807358,
+  "self_condition": false,
+  "mask_pattern": "independent",
+  "eval_steps": 8,
+  "eval_mask_mode": "antithetic"
+}
