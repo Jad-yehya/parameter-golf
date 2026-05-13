@@ -80,6 +80,8 @@ class Hyperparameters:
     attn_out_gate_width = int(os.environ.get("ATTN_OUT_GATE_WIDTH", "12"))
     sparse_attn_gate = bool(int(os.environ.get("SPARSE_ATTN_GATE", "0")))
     sparse_attn_gate_scale = float(os.environ.get("SPARSE_ATTN_GATE_SCALE", "1.0"))
+    universal_shared_blocks = bool(int(os.environ.get("UNIVERSAL_SHARED_BLOCKS", "0")))
+    universal_step_embedding = bool(int(os.environ.get("UNIVERSAL_STEP_EMBEDDING", "1")))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -644,6 +646,8 @@ class CausalSelfAttention(nn.Module):
         attn_out_gate_width: int = 12,
         sparse_attn_gate: bool = False,
         sparse_attn_gate_scale: float = 1.0,
+        universal_shared_blocks: bool = False,
+        universal_step_embedding: bool = False,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -831,6 +835,8 @@ class GPT(nn.Module):
         attn_out_gate_width: int = 12,
         sparse_attn_gate: bool = False,
         sparse_attn_gate_scale: float = 1.0,
+        universal_shared_blocks: bool = False,
+        universal_step_embedding: bool = False,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -847,26 +853,39 @@ class GPT(nn.Module):
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32))
-        self.blocks = nn.ModuleList(
-            [
-                Block(
-                    model_dim,
-                    num_heads,
-                    num_kv_heads,
-                    mlp_mult,
-                    rope_base,
-                    qk_gain_init,
-                    iha_lite and i >= iha_start_layer,
-                    iha_mix_v,
-                    attn_out_gate,
-                    attn_out_gate_src,
-                    attn_out_gate_width,
-                    sparse_attn_gate,
-                    sparse_attn_gate_scale,
-                )
-                for i in range(num_layers)
-            ]
+        self.universal_shared_blocks = universal_shared_blocks
+        self.universal_step_embedding = (
+            nn.Parameter(torch.zeros(num_layers, model_dim, dtype=torch.float32))
+            if universal_step_embedding
+            else None
         )
+
+        def make_block(layer_idx: int) -> Block:
+            return Block(
+                model_dim,
+                num_heads,
+                num_kv_heads,
+                mlp_mult,
+                rope_base,
+                qk_gain_init,
+                iha_lite and layer_idx >= iha_start_layer,
+                iha_mix_v,
+                attn_out_gate,
+                attn_out_gate_src,
+                attn_out_gate_width,
+                sparse_attn_gate,
+                sparse_attn_gate_scale,
+            )
+
+        if universal_shared_blocks:
+            enc_block = make_block(0)
+            dec_block = make_block(self.num_encoder_layers)
+            self.blocks = nn.ModuleList(
+                [enc_block for _ in range(self.num_encoder_layers)]
+                + [dec_block for _ in range(self.num_decoder_layers)]
+            )
+        else:
+            self.blocks = nn.ModuleList([make_block(i) for i in range(num_layers)])
         self.parallel_enabled = 0 <= parallel_start_layer < num_layers
         if self.parallel_enabled:
             self.parallel_resid_lambdas = nn.Parameter(torch.ones(num_layers, 2, dtype=torch.float32))
@@ -880,6 +899,11 @@ class GPT(nn.Module):
         if self.lm_head is not None:
             self.lm_head._zero_init = True
         self._init_weights()
+
+    def _add_step_embedding(self, x: Tensor, layer_idx: int) -> Tensor:
+        if self.universal_step_embedding is None:
+            return x
+        return x + self.universal_step_embedding[layer_idx].to(dtype=x.dtype)[None, None, :]
 
     def _init_weights(self) -> None:
         if self.tie_embeddings:
@@ -898,6 +922,7 @@ class GPT(nn.Module):
 
         # First half stores skips; second half reuses them in reverse order.
         for i in range(self.num_encoder_layers):
+            x = self._add_step_embedding(x, i)
             x = self.blocks[i](x, x0)
             skips.append(x)
         for i in range(self.num_decoder_layers):
@@ -913,12 +938,14 @@ class GPT(nn.Module):
                     lane_attn = x
                     lane_mlp = x
                 assert lane_mlp is not None
+                lane_attn = self._add_step_embedding(lane_attn, block_idx)
                 attn_out, mlp_out = self.blocks[block_idx].parallel_forward(lane_attn, lane_mlp, x0)
                 resid = self.parallel_resid_lambdas[block_idx].to(dtype=x.dtype)
                 post = self.parallel_post_lambdas[block_idx].to(dtype=x.dtype)
                 lane_attn = resid[0] * lane_attn + post[0, 0] * attn_out + post[0, 1] * mlp_out
                 lane_mlp = resid[1] * lane_mlp + post[1, 0] * attn_out + post[1, 1] * mlp_out
             else:
+                x = self._add_step_embedding(x, block_idx)
                 x = self.blocks[block_idx](x, x0)
 
         if lane_attn is not None:
@@ -1084,6 +1111,8 @@ def main() -> None:
         attn_out_gate_width=args.attn_out_gate_width,
         sparse_attn_gate=args.sparse_attn_gate,
         sparse_attn_gate_scale=args.sparse_attn_gate_scale,
+        universal_shared_blocks=args.universal_shared_blocks,
+        universal_step_embedding=args.universal_step_embedding,
     ).to(device=device, dtype=compute_dtype)
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1110,6 +1139,8 @@ def main() -> None:
     ]
     if base_model.skip_weights.numel() > 0:
         scalar_params.append(base_model.skip_weights)
+    if base_model.universal_step_embedding is not None:
+        scalar_params.append(base_model.universal_step_embedding)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
     adam_fused = should_use_fused_adam(args.adam_fused, device)
     optimizer_tok = torch.optim.Adam(
@@ -1161,6 +1192,10 @@ def main() -> None:
         f"attn_out_gate:{args.attn_out_gate} attn_out_gate_src:{args.attn_out_gate_src} "
         f"attn_out_gate_width:{args.attn_out_gate_width} "
         f"sparse_attn_gate:{args.sparse_attn_gate} sparse_attn_gate_scale:{args.sparse_attn_gate_scale}"
+    )
+    log0(
+        f"universal_shared_blocks:{args.universal_shared_blocks} "
+        f"universal_step_embedding:{args.universal_step_embedding}"
     )
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
